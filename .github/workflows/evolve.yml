@@ -1,4 +1,4 @@
-name: 🧬 Darwin2025 Evolver
+name: 🧬 Darwin2025 Evolver (mini mode)
 
 on:
   schedule:
@@ -14,21 +14,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 🧠 Read and evolve evol.md
+      - name: 🧠 Read and evolve evol.md (steady evolution)
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-5-auto
+          model: gpt-4o-mini          # ← 地味で安定した進化
           safety-strategy: unsafe
           prompt: |
-            Read evol.md.
-            Summarize the current reflections and improvements.
-            Then append a new section titled:
-            "Next Evolution Plan ({{ date }})"
-            proposing concrete technical upgrades, UX ideas,
-            or structural changes for the next iteration.
-            Write naturally in Japanese.
-            Keep previous logs intact.
+            あなたは静かに進化するAI研究者です。
+            現在の evol.md を読み取り、
+            先週の反省点と進歩を要約してください。
+            その下に新しい章を追加します。
+
+            ## 次の進化計画（{{ date }}）
+            - 改善提案は控えめで現実的に。
+            - 無理な拡張ではなく、継続性を重視。
+            - 進化は少しずつ、しかし確実に行う。
+            - 必ず日本語で書き、過去ログは保持する。
+
+            出力形式は元の evol.md の構造を維持し、
+            追記部分は一番下に追加してください。
           output-file: evol.md
 
       - name: 💾 Commit updated evol.md
@@ -36,5 +41,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add evol.md
-          git diff --staged --quiet || git commit -m "🧬 Evol.md updated by Codex"
+          git diff --staged --quiet || git commit -m "🧬 Evol.md auto-evolved (mini update)"
           git push
