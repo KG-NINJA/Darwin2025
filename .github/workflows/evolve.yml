@@ -1,45 +1,88 @@
-name: 🧬 Darwin2025 Evolver (daily mini mode)
+name: 🧬 Darwin2025 Daily Evolution
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # JST正午に毎日実行（UTC 03:00）
-  workflow_dispatch:
+    - cron: "0 0 * * *"        # UTCで毎日0時 = JST午前9時
+  workflow_dispatch:            # 手動実行も可能
 
 permissions:
   contents: write
 
 jobs:
   evolve:
+    name: 🌱 Self-Evolution Cycle
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 20
 
-      - name: 🧠 Read and evolve evol.md (daily micro evolution)
+    steps:
+      - name: 🧩 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🗂 Prepare Codex environment
+        run: |
+          mkdir -p /home/runner/.codex
+          chmod -R 777 /home/runner/.codex
+          echo "✅ Codex environment ready"
+
+      - name: 🧬 Run Codex Evolution
+        id: run_codex
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-4o-mini          # 静かで安定した進化
-          safety-strategy: unsafe
+          model: gpt-4o-mini
+          codex-version: "0.49.0"
+          codex-home: /home/runner/.codex
+          safety-strategy: unprivileged-user
+          codex-user: "codex-runner"
+          allow-users: "KG-NINJA"
+          allow-bots: "true"
+          sandbox: workspace-write
           prompt: |
             あなたは静かに進化するAI研究者です。
             現在の evol.md を読み取り、
-            昨日までの反省点と改善を要約してください。
+            前回の記述からの反省点・改善点・学びをまとめてください。
+
             その下に新しい章を追加します。
 
             ## 次の進化計画（{{ date }}）
             - 改善提案は控えめで現実的に。
             - 無理な拡張ではなく、継続性を重視。
-            - 日々少しずつ、しかし確実に成長する。
+            - 進化は少しずつ、しかし確実に行う。
             - 必ず日本語で書き、過去ログは保持する。
 
             出力形式は元の evol.md の構造を維持し、
-            新しいセクションを一番下に追記してください。
+            新しい進化記録を一番下に追加してください。
           output-file: evol.md
 
-      - name: 💾 Commit updated evol.md
+      - name: 💾 Commit & Push updated evol.md
+        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add evol.md
-          git diff --staged --quiet || git commit -m "🧬 Daily micro-evolution (mini update)"
-          git push
+          if git diff --staged --quiet; then
+            echo "No new evolution updates."
+          else
+            git commit -m "🧬 Evol.md auto-evolved (mini update)"
+            git push origin main
+          fi
+
+      - name: 📤 Upload evol.md as artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evol_log
+          path: evol.md
+          retention-days: 14
+
+      - name: ✅ Summary
+        if: always()
+        run: |
+          echo "=== Darwin2025 Evolution Summary ==="
+          if [ -f evol.md ]; then
+            head -n 20 evol.md
+          else
+            echo "⚠️ evol.md not found."
+          fi
