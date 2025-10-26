@@ -1,9 +1,9 @@
-name: Darwin Evolution Run
+name: 🧬 Darwin2025 Evolver (daily mini mode)
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *' # JST 15:00 (UTC 6:00)
+    - cron: "0 3 * * *"   # JST正午に毎日実行（UTC 03:00）
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,48 +12,32 @@ jobs:
   evolve:
     runs-on: ubuntu-latest
     steps:
-      - name: チェックアウト
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: 🧠 Read and evolve evol.md (daily micro evolution)
+        uses: openai/codex-action@v1
         with:
-          fetch-depth: 0
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-4o-mini          # 静かで安定した進化
+          safety-strategy: unsafe
+          prompt: |
+            あなたは静かに進化するAI研究者です。
+            現在の evol.md を読み取り、
+            昨日までの反省点と改善を要約してください。
+            その下に新しい章を追加します。
+            ## 次の進化計画（{{ date }}）
+            - 改善提案は控えめで現実的に。
+            - 無理な拡張ではなく、継続性を重視。
+            - 日々少しずつ、しかし確実に成長する。
+            - 必ず日本語で書き、過去ログは保持する。
+            出力形式は元の evol.md の構造を維持し、
+            新しいセクションを一番下に追記してください。
+          output-file: evol.md
 
-      - name: Node.js セットアップ
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Codex 環境構築
+      - name: 💾 Commit updated evol.md
         run: |
-          npm install -g "@openai/codex@0.49.0"
-          npm install -g "@openai/codex-responses-api-proxy@0.49.0"
-          mkdir -p ~/.codex
-          echo '{"proxyPort":44337}' > ~/.codex/18810695141.json
-
-      - name: Codex Proxy 起動
-        run: |
-          nohup npx codex-responses-api-proxy &
-          sleep 5
-
-      - name: Codex 実行
-        run: |
-          CODEX_HOME=$HOME/.codex \
-          /opt/hostedtoolcache/node/20.19.5/x64/bin/codex exec \
-            --skip-git-repo-check \
-            --cd "$GITHUB_WORKSPACE" \
-            --output-last-message evol.md \
-            --model gpt-4o-mini \
-            --sandbox workspace-write <<'EOF'
-          # Evolutionary update prompt
-          Continue the previous file "evol.md" with the next step of AI evolution.
-          Summarize the latest repository changes, analyze improvements, and propose the next mutation cycle.
-          EOF
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
-      - name: evol.md をコミット
-        run: |
-          git config --global user.name "codex-bot"
-          git config --global user.email "bot@example.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add evol.md
-          git commit -m "Codex evolution update [skip ci]" || echo "No changes"
-          git push origin HEAD:${{ github.ref }}
+          git diff --staged --quiet || git commit -m "🧬 Daily micro-evolution (mini update)"
+          git push
