@@ -1,88 +1,57 @@
-name: 🧬 Darwin2025 Daily Evolution
+name: Darwin Evolution Run
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"        # UTCで毎日0時 = JST午前9時
-  workflow_dispatch:            # 手動実行も可能
+    - cron: '0 6 * * *' # JST 15:00 (UTC 6:00)
 
 permissions:
   contents: write
 
 jobs:
   evolve:
-    name: 🌱 Self-Evolution Cycle
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
     steps:
-      - name: 🧩 Checkout repository
+      - name: チェックアウト
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🗂 Prepare Codex environment
-        run: |
-          mkdir -p /home/runner/.codex
-          chmod -R 777 /home/runner/.codex
-          echo "✅ Codex environment ready"
-
-      - name: 🧬 Run Codex Evolution
-        id: run_codex
-        uses: openai/codex-action@v1
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-4o-mini
-          codex-version: "0.49.0"
-          codex-home: /home/runner/.codex
-          safety-strategy: unprivileged-user
-          codex-user: "codex-runner"
-          allow-users: "KG-NINJA"
-          allow-bots: "true"
-          sandbox: workspace-write
-          prompt: |
-            あなたは静かに進化するAI研究者です。
-            現在の evol.md を読み取り、
-            前回の記述からの反省点・改善点・学びをまとめてください。
+          node-version: '20'
 
-            その下に新しい章を追加します。
-
-            ## 次の進化計画（{{ date }}）
-            - 改善提案は控えめで現実的に。
-            - 無理な拡張ではなく、継続性を重視。
-            - 進化は少しずつ、しかし確実に行う。
-            - 必ず日本語で書き、過去ログは保持する。
-
-            出力形式は元の evol.md の構造を維持し、
-            新しい進化記録を一番下に追加してください。
-          output-file: evol.md
-
-      - name: 💾 Commit & Push updated evol.md
-        if: success()
+      - name: Codex Action 環境構築
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm install -g "@openai/codex@0.49.0"
+          npm install -g "@openai/codex-responses-api-proxy@0.49.0"
+          mkdir -p ~/.codex
+          echo '{"proxyPort":44337}' > ~/.codex/18810695141.json
+          echo "Codex 環境準備完了"
+
+      - name: Codex Proxy 起動
+        run: |
+          nohup npx codex-responses-api-proxy &
+          sleep 5
+          echo "Proxy 稼働中"
+
+      - name: Codex 実行
+        run: |
+          CODEX_HOME=$HOME/.codex \
+          /opt/hostedtoolcache/node/20.19.5/x64/bin/codex exec \
+            --skip-git-repo-check \
+            --cd "$GITHUB_WORKSPACE" \
+            --output-last-message evol.md \
+            --model gpt-4o-mini \
+            --sandbox workspace-write
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: evol.md をコミット
+        run: |
+          git config --global user.name "codex-bot"
+          git config --global user.email "bot@example.com"
           git add evol.md
-          if git diff --staged --quiet; then
-            echo "No new evolution updates."
-          else
-            git commit -m "🧬 Evol.md auto-evolved (mini update)"
-            git push origin main
-          fi
-
-      - name: 📤 Upload evol.md as artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: evol_log
-          path: evol.md
-          retention-days: 14
-
-      - name: ✅ Summary
-        if: always()
-        run: |
-          echo "=== Darwin2025 Evolution Summary ==="
-          if [ -f evol.md ]; then
-            head -n 20 evol.md
-          else
-            echo "⚠️ evol.md not found."
-          fi
+          git commit -m "Codex evolution update [skip ci]" || echo "No changes"
+          git push origin HEAD:${{ github.ref }}
