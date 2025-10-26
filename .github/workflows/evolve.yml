@@ -17,24 +17,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Node.js をセットアップ
+      - name: Node.js セットアップ
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Codex Action 環境構築
+      - name: Codex 環境構築
         run: |
           npm install -g "@openai/codex@0.49.0"
           npm install -g "@openai/codex-responses-api-proxy@0.49.0"
           mkdir -p ~/.codex
           echo '{"proxyPort":44337}' > ~/.codex/18810695141.json
-          echo "Codex 環境準備完了"
 
       - name: Codex Proxy 起動
         run: |
           nohup npx codex-responses-api-proxy &
           sleep 5
-          echo "Proxy 稼働中"
 
       - name: Codex 実行
         run: |
@@ -44,7 +42,11 @@ jobs:
             --cd "$GITHUB_WORKSPACE" \
             --output-last-message evol.md \
             --model gpt-4o-mini \
-            --sandbox workspace-write
+            --sandbox workspace-write <<'EOF'
+          # Evolutionary update prompt
+          Continue the previous file "evol.md" with the next step of AI evolution.
+          Summarize the latest repository changes, analyze improvements, and propose the next mutation cycle.
+          EOF
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
