@@ -1,35 +1,21 @@
-name: 🧬 Darwin2025 Swarm Evolver (Codex Web mode)
+name: 🧬 Darwin2025 Swarm Evolver (Codex Safe Mode)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # JST正午に毎日実行（UTC 03:00）
+    - cron: "0 3 * * *"   # JST正午に実行
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  evolve:
+  # ---------- 子個体進化ステップ ----------
+  evolve-child1:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # 初回起動用：構造がなければ自動生成
-      - name: ⚙️ Initialize if missing
-        run: |
-          mkdir -p agents/child_1 agents/child_2 agents/child_3
-          for c in agents/child_1 agents/child_2 agents/child_3; do
-            if [ ! -f "$c/evol.md" ]; then
-              echo "# 初期個体ログ" > "$c/evol.md"
-              echo "## 進化開始 $(date '+%Y-%m-%d')" >> "$c/evol.md"
-            fi
-          done
-          if [ ! -f evol_master.md ]; then
-            echo "# 群体進化マスター記録" > evol_master.md
-            echo "初期生成 $(date '+%Y-%m-%d')" >> evol_master.md
-          fi
-
-      # 各 child を Codex Web 経由で進化させる
+      - name: ⚙️ Init if missing
+        run: mkdir -p agents/child_1 && [ -f agents/child_1/evol.md ] || echo "# 初期個体ログ\n## 進化開始 $(date '+%Y-%m-%d')" > agents/child_1/evol.md
       - name: 🌱 Evolve child_1
         uses: openai/codex-action@v1
         with:
@@ -38,12 +24,25 @@ jobs:
           safety-strategy: unsafe
           prompt: |
             あなたは独立したAI個体（child_1）です。
-            現在の evol.md を読み取り、昨日までの記録を簡潔に要約し、
+            現在の evol.md を読み取り、昨日までの記録を要約し、
             新しい「# 日次更新 {{ date }}」を1章追加してください。
-            日本語で記述し、過去ログは保持してください。
-          input-files: agents/child_1/evol.md
+            日本語で記述し、過去ログを保持してください。
           output-file: agents/child_1/evol.md
 
+      - name: 💾 Commit child_1
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add agents/child_1/evol.md
+          git diff --staged --quiet || git commit -m "🌱 child_1 evolution $(date '+%Y-%m-%d')"
+          git push
+
+  evolve-child2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ⚙️ Init if missing
+        run: mkdir -p agents/child_2 && [ -f agents/child_2/evol.md ] || echo "# 初期個体ログ\n## 進化開始 $(date '+%Y-%m-%d')" > agents/child_2/evol.md
       - name: 🌱 Evolve child_2
         uses: openai/codex-action@v1
         with:
@@ -52,12 +51,24 @@ jobs:
           safety-strategy: unsafe
           prompt: |
             あなたは独立したAI個体（child_2）です。
-            現在の evol.md を読み取り、昨日までの記録を簡潔に要約し、
+            現在の evol.md を読み取り、昨日までの記録を要約し、
             新しい「# 日次更新 {{ date }}」を1章追加してください。
-            日本語で記述し、過去ログは保持してください。
-          input-files: agents/child_2/evol.md
+            日本語で記述し、過去ログを保持してください。
           output-file: agents/child_2/evol.md
+      - name: 💾 Commit child_2
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add agents/child_2/evol.md
+          git diff --staged --quiet || git commit -m "🌱 child_2 evolution $(date '+%Y-%m-%d')"
+          git push
 
+  evolve-child3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ⚙️ Init if missing
+        run: mkdir -p agents/child_3 && [ -f agents/child_3/evol.md ] || echo "# 初期個体ログ\n## 進化開始 $(date '+%Y-%m-%d')" > agents/child_3/evol.md
       - name: 🌱 Evolve child_3
         uses: openai/codex-action@v1
         with:
@@ -66,13 +77,24 @@ jobs:
           safety-strategy: unsafe
           prompt: |
             あなたは独立したAI個体（child_3）です。
-            現在の evol.md を読み取り、昨日までの記録を簡潔に要約し、
+            現在の evol.md を読み取り、昨日までの記録を要約し、
             新しい「# 日次更新 {{ date }}」を1章追加してください。
-            日本語で記述し、過去ログは保持してください。
-          input-files: agents/child_3/evol.md
+            日本語で記述し、過去ログを保持してください。
           output-file: agents/child_3/evol.md
+      - name: 💾 Commit child_3
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add agents/child_3/evol.md
+          git diff --staged --quiet || git commit -m "🌱 child_3 evolution $(date '+%Y-%m-%d')"
+          git push
 
-      # 群体の共通知見をまとめてマスターに追加
+  # ---------- 群体統合ステップ ----------
+  summarize:
+    runs-on: ubuntu-latest
+    needs: [evolve-child1, evolve-child2, evolve-child3]
+    steps:
+      - uses: actions/checkout@v4
       - name: 🧠 Summarize swarm insights
         uses: openai/codex-action@v1
         with:
@@ -81,21 +103,15 @@ jobs:
           safety-strategy: unsafe
           prompt: |
             あなたは群体進化を観測するAI研究者です。
-            agents以下のすべてのevol.mdを読み取り、
-            今日の進化傾向・協調・新しい知見を日本語で要約し、
+            agents以下の全てのevol.mdを読み取り、
+            今日の進化傾向と共通知見を日本語で要約し、
             evol_master.md の末尾に「# 共通知見 {{ date }}」を追加してください。
-            構造を保持し、過去ログを消さずに追記してください。
-          input-files: |
-            agents/child_1/evol.md
-            agents/child_2/evol.md
-            agents/child_3/evol.md
+            構造を保持し、過去ログは消さずに追記してください。
           output-file: evol_master.md
-
-      # すべてをコミットして保存
-      - name: 💾 Commit updates
+      - name: 💾 Commit master
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add agents/ evol_master.md
-          git diff --staged --quiet || git commit -m "🧬 Swarm co-evolution update $(date '+%Y-%m-%d')"
+          git add evol_master.md
+          git diff --staged --quiet || git commit -m "🧬 Swarm co-evolution summary $(date '+%Y-%m-%d')"
           git push
