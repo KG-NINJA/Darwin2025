@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 初期構造を自動生成（初回実行用）
+      # 初期構造を自動生成（初回でもエラーにならない）
       - name: ⚙️ Initialize if missing
         run: |
           mkdir -p agents/child_1 agents/child_2 agents/child_3
@@ -29,20 +29,21 @@ jobs:
             echo "初期生成 $(date '+%Y-%m-%d')" >> evol_master.md
           fi
 
-      # 各子個体を個別に進化させる
+      # 各子個体を独立的に進化させる
       - name: 🌱 Evolve each child
         run: |
           for c in agents/child_1 agents/child_2 agents/child_3; do
             echo "進化処理中: $c"
-            npx -y @openai/codex run \
+            npx -y @openai/codex \
+              run \
               --model gpt-4o-mini \
-              --api-key ${{ secrets.OPENAI_API_KEY }} \
               --input-file "$c/evol.md" \
               --output-file "$c/evol.md" \
-              --prompt "あなたは独立したAI個体です。前回の記録を簡潔に要約し、新しい日次更新を1章追加してください。必ず日本語で書き、過去ログを保持してください。"
+              --prompt "あなたは独立したAI個体です。前回の記録を簡潔に要約し、新しい日次更新を1章追加してください。必ず日本語で書き、過去ログを保持してください。" \
+              -- --api-key ${{ secrets.OPENAI_API_KEY }}
           done
 
-      # 群体の共通知見をまとめる
+      # 群体全体を観測し共通知見を生成
       - name: 🧠 Summarize swarm insights
         uses: openai/codex-action@v1
         with:
@@ -50,7 +51,7 @@ jobs:
           model: gpt-4o-mini
           safety-strategy: unsafe
           prompt: |
-            あなたは群体進化の観測者です。
+            あなたは群体進化を観測するAI研究者です。
             agents以下のすべてのevol.mdを読み取り、
             今日の進化傾向・協調・新しい知見を日本語で要約し、
             evol_master.md の末尾に「# 共通知見 {{ date }}」を追加してください。
@@ -61,7 +62,7 @@ jobs:
             agents/child_3/evol.md
           output-file: evol_master.md
 
-      # 変更をコミットしてプッシュ
+      # 更新をコミットしてGitHubに反映
       - name: 💾 Commit updates
         run: |
           git config user.name "github-actions[bot]"
