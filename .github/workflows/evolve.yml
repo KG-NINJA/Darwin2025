@@ -1,8 +1,8 @@
-name: 🧬 Darwin2025 Swarm Evolver (self-boot mode)
+name: 🧬 Darwin2025 Swarm Evolver (auto-cyclic mode)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # JST正午に実行（UTC 03:00）
+    - cron: "0 3 * * *"   # JST正午に毎日実行（UTC 03:00）
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: ⚙️ Initialize structure if missing
+      # 初期構造を自動生成（初回実行用）
+      - name: ⚙️ Initialize if missing
         run: |
           mkdir -p agents/child_1 agents/child_2 agents/child_3
           for c in agents/child_1 agents/child_2 agents/child_3; do
@@ -28,28 +29,43 @@ jobs:
             echo "初期生成 $(date '+%Y-%m-%d')" >> evol_master.md
           fi
 
-      - name: 🧠 Swarm co-evolution
+      # 各子個体を個別に進化させる
+      - name: 🌱 Evolve each child
+        run: |
+          for c in agents/child_1 agents/child_2 agents/child_3; do
+            echo "進化処理中: $c"
+            npx -y @openai/codex run \
+              --model gpt-4o-mini \
+              --api-key ${{ secrets.OPENAI_API_KEY }} \
+              --input-file "$c/evol.md" \
+              --output-file "$c/evol.md" \
+              --prompt "あなたは独立したAI個体です。前回の記録を簡潔に要約し、新しい日次更新を1章追加してください。必ず日本語で書き、過去ログを保持してください。"
+          done
+
+      # 群体の共通知見をまとめる
+      - name: 🧠 Summarize swarm insights
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: gpt-4o-mini
           safety-strategy: unsafe
           prompt: |
-            あなたは群体進化を観測するAI研究者です。
-            agents以下の各フォルダにあるevol.mdを順に読み、
-            各子個体に日次更新を追加してください。
-            その内容を要約し、共通知見を evol_master.md に追記します。
-            出力は日本語で行い、既存構造を保持します。
+            あなたは群体進化の観測者です。
+            agents以下のすべてのevol.mdを読み取り、
+            今日の進化傾向・協調・新しい知見を日本語で要約し、
+            evol_master.md の末尾に「# 共通知見 {{ date }}」を追加してください。
+            構造を保持し、過去ログを消さずに追記してください。
           input-files: |
             agents/child_1/evol.md
             agents/child_2/evol.md
             agents/child_3/evol.md
           output-file: evol_master.md
 
+      # 変更をコミットしてプッシュ
       - name: 💾 Commit updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add agents/ evol_master.md
-          git diff --staged --quiet || git commit -m "🧬 Swarm co-evolution update"
+          git diff --staged --quiet || git commit -m "🧬 Swarm auto-coevolution update $(date '+%Y-%m-%d')"
           git push
