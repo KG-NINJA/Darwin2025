@@ -1,8 +1,7 @@
-name: 🧬 Darwin2025 Evolver (daily mini mode)
-
+name: 🧬 Darwin2025 Swarm Evolver
 on:
   schedule:
-    - cron: "0 3 * * *"   # JST正午に毎日実行（UTC 03:00）
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -14,30 +13,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 🧠 Read and evolve evol.md (daily micro evolution)
+      - name: 🧠 Evolve each agent
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-4o-mini          # 静かで安定した進化
+          model: gpt-4o-mini
           safety-strategy: unsafe
           prompt: |
-            あなたは静かに進化するAI研究者です。
-            現在の evol.md を読み取り、
-            昨日までの反省点と改善を要約してください。
-            その下に新しい章を追加します。
-            ## 次の進化計画（{{ date }}）
-            - 改善提案は控えめで現実的に。
-            - 無理な拡張ではなく、継続性を重視。
-            - 日々少しずつ、しかし確実に成長する。
-            - 必ず日本語で書き、過去ログは保持する。
-            出力形式は元の evol.md の構造を維持し、
-            新しいセクションを一番下に追記してください。
-          output-file: evol.md
+            あなたは群体進化を観測するAI研究者です。
+            agents以下の各フォルダにあるevol.mdを順に読み、
+            それぞれに日次更新を追加します。
+            さらに、各子の改善を他の子へフィードバックする要約を作成し、
+            ルートの evol_master.md に記録します。
+            出力は日本語で行い、構造を保持します。
+          input-files: |
+            agents/child_1/evol.md
+            agents/child_2/evol.md
+            agents/child_3/evol.md
+          output-file: evol_master.md
 
-      - name: 💾 Commit updated evol.md
+      - name: 💾 Commit updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add evol.md
-          git diff --staged --quiet || git commit -m "🧬 Daily micro-evolution (mini update)"
+          git add agents/ evol_master.md
+          git diff --staged --quiet || git commit -m "🧬 Swarm co-evolution update"
           git push
