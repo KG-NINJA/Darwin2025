@@ -1,7 +1,8 @@
-name: 🧬 Darwin2025 Swarm Evolver
+name: 🧬 Darwin2025 Swarm Evolver (self-boot mode)
+
 on:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "0 3 * * *"   # JST正午に実行（UTC 03:00）
   workflow_dispatch:
 
 permissions:
@@ -13,7 +14,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 🧠 Evolve each agent
+      - name: ⚙️ Initialize structure if missing
+        run: |
+          mkdir -p agents/child_1 agents/child_2 agents/child_3
+          for c in agents/child_1 agents/child_2 agents/child_3; do
+            if [ ! -f "$c/evol.md" ]; then
+              echo "# 初期個体ログ" > "$c/evol.md"
+              echo "## 進化開始 $(date '+%Y-%m-%d')" >> "$c/evol.md"
+            fi
+          done
+          if [ ! -f evol_master.md ]; then
+            echo "# 群体進化マスター記録" > evol_master.md
+            echo "初期生成 $(date '+%Y-%m-%d')" >> evol_master.md
+          fi
+
+      - name: 🧠 Swarm co-evolution
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -22,10 +37,9 @@ jobs:
           prompt: |
             あなたは群体進化を観測するAI研究者です。
             agents以下の各フォルダにあるevol.mdを順に読み、
-            それぞれに日次更新を追加します。
-            さらに、各子の改善を他の子へフィードバックする要約を作成し、
-            ルートの evol_master.md に記録します。
-            出力は日本語で行い、構造を保持します。
+            各子個体に日次更新を追加してください。
+            その内容を要約し、共通知見を evol_master.md に追記します。
+            出力は日本語で行い、既存構造を保持します。
           input-files: |
             agents/child_1/evol.md
             agents/child_2/evol.md
