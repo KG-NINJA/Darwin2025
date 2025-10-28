@@ -1,4 +1,4 @@
-name: 🧬 Darwin2025 Swarm Evolver (auto-cyclic mode)
+name: 🧬 Darwin2025 Swarm Evolver (Codex Web mode)
 
 on:
   schedule:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 初期構造を自動生成（初回でもエラーにならない）
+      # 初回起動用：構造がなければ自動生成
       - name: ⚙️ Initialize if missing
         run: |
           mkdir -p agents/child_1 agents/child_2 agents/child_3
@@ -29,21 +29,50 @@ jobs:
             echo "初期生成 $(date '+%Y-%m-%d')" >> evol_master.md
           fi
 
-      # 各子個体を独立的に進化させる
-      - name: 🌱 Evolve each child
-        run: |
-          for c in agents/child_1 agents/child_2 agents/child_3; do
-            echo "進化処理中: $c"
-            npx -y @openai/codex \
-              run \
-              --model gpt-4o-mini \
-              --input-file "$c/evol.md" \
-              --output-file "$c/evol.md" \
-              --prompt "あなたは独立したAI個体です。前回の記録を簡潔に要約し、新しい日次更新を1章追加してください。必ず日本語で書き、過去ログを保持してください。" \
-              -- --api-key ${{ secrets.OPENAI_API_KEY }}
-          done
+      # 各 child を Codex Web 経由で進化させる
+      - name: 🌱 Evolve child_1
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-4o-mini
+          safety-strategy: unsafe
+          prompt: |
+            あなたは独立したAI個体（child_1）です。
+            現在の evol.md を読み取り、昨日までの記録を簡潔に要約し、
+            新しい「# 日次更新 {{ date }}」を1章追加してください。
+            日本語で記述し、過去ログは保持してください。
+          input-files: agents/child_1/evol.md
+          output-file: agents/child_1/evol.md
 
-      # 群体全体を観測し共通知見を生成
+      - name: 🌱 Evolve child_2
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-4o-mini
+          safety-strategy: unsafe
+          prompt: |
+            あなたは独立したAI個体（child_2）です。
+            現在の evol.md を読み取り、昨日までの記録を簡潔に要約し、
+            新しい「# 日次更新 {{ date }}」を1章追加してください。
+            日本語で記述し、過去ログは保持してください。
+          input-files: agents/child_2/evol.md
+          output-file: agents/child_2/evol.md
+
+      - name: 🌱 Evolve child_3
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-4o-mini
+          safety-strategy: unsafe
+          prompt: |
+            あなたは独立したAI個体（child_3）です。
+            現在の evol.md を読み取り、昨日までの記録を簡潔に要約し、
+            新しい「# 日次更新 {{ date }}」を1章追加してください。
+            日本語で記述し、過去ログは保持してください。
+          input-files: agents/child_3/evol.md
+          output-file: agents/child_3/evol.md
+
+      # 群体の共通知見をまとめてマスターに追加
       - name: 🧠 Summarize swarm insights
         uses: openai/codex-action@v1
         with:
@@ -62,11 +91,11 @@ jobs:
             agents/child_3/evol.md
           output-file: evol_master.md
 
-      # 更新をコミットしてGitHubに反映
+      # すべてをコミットして保存
       - name: 💾 Commit updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add agents/ evol_master.md
-          git diff --staged --quiet || git commit -m "🧬 Swarm auto-coevolution update $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "🧬 Swarm co-evolution update $(date '+%Y-%m-%d')"
           git push
