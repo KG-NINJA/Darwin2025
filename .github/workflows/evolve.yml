@@ -1,8 +1,8 @@
-name: 🧬 Darwin2025 Evolver (Stable Single Mode)
+name: 🧬 Darwin2025 Evolver (Adaptive Stable Mode)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # JST正午
+    - cron: "0 3 * * *"   # JST正午に実行
   workflow_dispatch:
 
 permissions:
@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # --- 初期化 ---
       - name: ⚙️ Initialize if missing
         run: |
           mkdir -p agents/child_1
@@ -22,21 +23,44 @@ jobs:
             echo "# 初期個体ログ" > agents/child_1/evol.md
             echo "## 進化開始 $(date '+%Y-%m-%d')" >> agents/child_1/evol.md
           fi
+          if [ ! -f agents/child_1/state.json ]; then
+            echo '{"iteration":1, "theme":"安定性"}' > agents/child_1/state.json
+          fi
 
-      - name: 🔍 Prepare prompt with diff
+      # --- diff＋テーマ準備 ---
+      - name: 🧩 Prepare dynamic prompt
         run: |
+          # 差分ファイル生成
           git diff HEAD~1 HEAD > diff.log || echo "No previous commits" > diff.log
+
+          # state.json 読み込み
+          THEME=$(jq -r '.theme' agents/child_1/state.json)
+          ITER=$(jq -r '.iteration' agents/child_1/state.json)
+
+          # 次テーマ選択（5テーマ循環）
+          themes=("安定性" "直感" "効率" "創造性" "拡張性")
+          index=$(( (ITER + 1) % ${#themes[@]} ))
+          NEXT_THEME=${themes[$index]}
+
+          # prompt作成
+          DATE=$(date '+%Y-%m-%d')
           echo "リポジトリの最新変更点は以下です:" > prompt.txt
           cat diff.log >> prompt.txt
           echo "" >> prompt.txt
-          echo "これを踏まえて、進化ログを具体的に更新してください。" >> prompt.txt
+          echo "今回の進化テーマは「${THEME}」です。" >> prompt.txt
+          echo "次のテーマ候補は「${NEXT_THEME}」です。" >> prompt.txt
           echo "" >> prompt.txt
           echo "あなたは静かに進化を続ける単体AI個体です。" >> prompt.txt
           echo "現在の evol.md を読み取り、前回までの記録を要約し、" >> prompt.txt
-          echo "新しい「# 日次更新 $(date '+%Y-%m-%d')」を1章追加してください。" >> prompt.txt
-          echo "無理のない現実的な改善を意識し、日本語で記述し、" >> prompt.txt
-          echo "過去ログは保持してください。" >> prompt.txt
+          echo "新しい「# 日次更新 ${DATE}」を1章追加してください。" >> prompt.txt
+          echo "今回の焦点テーマ（${THEME}）を踏まえ、" >> prompt.txt
+          echo "前回と異なる観点を必ず1つ以上提示してください。" >> prompt.txt
+          echo "無理のない現実的な改善を意識し、日本語で記述し、過去ログを保持してください。" >> prompt.txt
 
+          # 次テーマと反復更新
+          jq --arg theme "$NEXT_THEME" --argjson iter $((ITER+1)) '.iteration=$iter | .theme=$theme' agents/child_1/state.json > tmp.json && mv tmp.json agents/child_1/state.json
+
+      # --- Codex 実行 ---
       - name: 🌱 Evolve single agent
         uses: openai/codex-action@v1
         with:
@@ -46,10 +70,19 @@ jobs:
           prompt-file: prompt.txt
           output-file: agents/child_1/evol.md
 
+      # --- 差分確認と警告 ---
+      - name: 🔍 Diff check
+        run: |
+          if [ -f prev_evol.md ]; then
+            diff -q prev_evol.md agents/child_1/evol.md || echo "✅ evol.md に変化があります。"
+          fi
+          cp agents/child_1/evol.md prev_evol.md
+
+      # --- 自動コミット ---
       - name: 💾 Commit update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add agents/child_1/evol.md
+          git add agents/child_1/evol.md agents/child_1/state.json
           git diff --staged --quiet || git commit -m "🧬 Daily evolution $(date '+%Y-%m-%d')"
           git push
