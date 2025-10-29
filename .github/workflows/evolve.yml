@@ -11,6 +11,7 @@ permissions:
 jobs:
   evolve:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,24 +23,27 @@ jobs:
             echo "## 進化開始 $(date '+%Y-%m-%d')" >> agents/child_1/evol.md
           fi
 
+      - name: 🔍 Prepare prompt with diff
+        run: |
+          git diff HEAD~1 HEAD > diff.log || echo "No previous commits" > diff.log
+          echo "リポジトリの最新変更点は以下です:" > prompt.txt
+          cat diff.log >> prompt.txt
+          echo "" >> prompt.txt
+          echo "これを踏まえて、進化ログを具体的に更新してください。" >> prompt.txt
+          echo "" >> prompt.txt
+          echo "あなたは静かに進化を続ける単体AI個体です。" >> prompt.txt
+          echo "現在の evol.md を読み取り、前回までの記録を要約し、" >> prompt.txt
+          echo "新しい「# 日次更新 $(date '+%Y-%m-%d')」を1章追加してください。" >> prompt.txt
+          echo "無理のない現実的な改善を意識し、日本語で記述し、" >> prompt.txt
+          echo "過去ログは保持してください。" >> prompt.txt
+
       - name: 🌱 Evolve single agent
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: gpt-4o-mini
           safety-strategy: unsafe
-          prompt: |
-          echo "リポジトリの最新変更点は以下です:" >> prompt.txt
-cat diff.log >> prompt.txt
-echo "これを踏まえて、進化ログを具体的に更新してください。" >> prompt.txt
-
-cat prompt.txt | codex exec ...
-
-            あなたは静かに進化を続ける単体AI個体です。
-            現在の evol.md を読み取り、前回までの記録を要約し、
-            新しい「# 日次更新 {{ date }}」を1章追加してください。
-            無理のない現実的な改善を意識し、日本語で記述し、
-            過去ログは保持してください。
+          prompt-file: prompt.txt
           output-file: agents/child_1/evol.md
 
       - name: 💾 Commit update
