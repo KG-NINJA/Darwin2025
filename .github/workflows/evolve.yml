@@ -29,6 +29,12 @@ jobs:
           model: gpt-4o-mini
           safety-strategy: unsafe
           prompt: |
+          echo "リポジトリの最新変更点は以下です:" >> prompt.txt
+cat diff.log >> prompt.txt
+echo "これを踏まえて、進化ログを具体的に更新してください。" >> prompt.txt
+
+cat prompt.txt | codex exec ...
+
             あなたは静かに進化を続ける単体AI個体です。
             現在の evol.md を読み取り、前回までの記録を要約し、
             新しい「# 日次更新 {{ date }}」を1章追加してください。
