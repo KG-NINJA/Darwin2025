@@ -37,38 +37,46 @@ jobs:
           NEXT_THEME=${themes[$index]}
           
           DATE=$(date '+%Y-%m-%d')
-          cat > prompt.txt << "PROMPT_EOF"
-          あなたは進化するAIエージェントです。
+          python3 << PYSCRIPT
+          import os
+          theme = "$THEME"
+          next_theme = "$NEXT_THEME"
+          best_score = "$BEST_SCORE"
+          iter_num = "$ITER"
+          date_str = "$DATE"
+          
+          prompt = f"""あなたは進化するAIエージェントです。
           以下は前回までの改善ログです：
           
           ---PREVIOUS_EVOL---
-          PROMPT_EOF
+          """
           
-          if [ -f agents/child_1/evol.md ]; then
-            tail -50 agents/child_1/evol.md >> prompt.txt
-          fi
+          if os.path.exists('agents/child_1/evol.md'):
+              with open('agents/child_1/evol.md', 'r') as f:
+                  lines = f.readlines()
+                  prompt += "".join(lines[-100:])
           
-          cat >> prompt.txt << "PROMPT_EOF"
+          with open('diff.log', 'r') as f:
+              diff_content = f.read()
           
+          prompt += f"""
           ---DIFF---
-          PROMPT_EOF
-          cat diff.log >> prompt.txt
-          cat >> prompt.txt << "PROMPT_EOF"
+          {diff_content}
           
           ---TASK---
-          進化テーマ: 「${THEME}」
-          次のテーマ: 「${NEXT_THEME}」
-          現在のベストスコア: ${BEST_SCORE}
-          反復回数: ${ITER}
+          進化テーマ: 「{theme}」
+          次のテーマ: 「{next_theme}」
+          現在のベストスコア: {best_score}
+          反復回数: {iter_num}
           
           以下のPythonアルゴリズムを改善してください：
           1. 現在の問題点を特定する
-          2. テーマ「${THEME}」に基づいた改善案を提案する
+          2. テーマ「{theme}」に基づいた改善案を提案する
           3. 実装可能なPythonコードを生成する（関数形式）
           4. テスト可能な指標を記述する
           
           出力形式：
-          # 日次更新 ${DATE}
+          # 日次更新 {date_str}
           ## 改善テーマ分析
           [分析内容]
           
@@ -79,7 +87,11 @@ jobs:
           
           ## テスト方法
           [テスト方法の説明]
-          PROMPT_EOF
+          """
+          
+          with open('prompt.txt', 'w') as f:
+              f.write(prompt)
+          PYSCRIPT
       
       # --- テキスト生成 ---
       - name: 🌱 Generate evolution text
