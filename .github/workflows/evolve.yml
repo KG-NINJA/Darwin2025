@@ -1,88 +1,273 @@
-name: 🧬 Darwin2025 Evolver (Adaptive Stable Mode)
-
+name: 🧬 Darwin2025 Evolver (Code Evolution Mode)
 on:
   schedule:
     - cron: "0 3 * * *"   # JST正午に実行
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   evolve:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
+      
       # --- 初期化 ---
       - name: ⚙️ Initialize if missing
         run: |
-          mkdir -p agents/child_1
+          mkdir -p agents/child_1/codes
+          mkdir -p agents/child_1/tests
           if [ ! -f agents/child_1/evol.md ]; then
             echo "# 初期個体ログ" > agents/child_1/evol.md
             echo "## 進化開始 $(date '+%Y-%m-%d')" >> agents/child_1/evol.md
           fi
           if [ ! -f agents/child_1/state.json ]; then
-            echo '{"iteration":1, "theme":"安定性"}' > agents/child_1/state.json
+            echo '{"iteration":1, "theme":"安定性", "best_score":0}' > agents/child_1/state.json
           fi
-
-      # --- diff＋テーマ準備 ---
+      
+      # --- diff + テーマ準備 ---
       - name: 🧩 Prepare dynamic prompt
         run: |
-          # 差分ファイル生成
-          git diff HEAD~1 HEAD > diff.log || echo "No previous commits" > diff.log
-
-          # state.json 読み込み
+          git diff HEAD~1 HEAD > diff.log 2>/dev/null || echo "No previous commits" > diff.log
           THEME=$(jq -r '.theme' agents/child_1/state.json)
           ITER=$(jq -r '.iteration' agents/child_1/state.json)
-
-          # 次テーマ選択（5テーマ循環）
+          BEST_SCORE=$(jq -r '.best_score' agents/child_1/state.json)
+          
           themes=("安定性" "直感" "効率" "創造性" "拡張性")
           index=$(( (ITER + 1) % ${#themes[@]} ))
           NEXT_THEME=${themes[$index]}
-
-          # prompt作成
+          
           DATE=$(date '+%Y-%m-%d')
-          echo "リポジトリの最新変更点は以下です:" > prompt.txt
-          cat diff.log >> prompt.txt
-          echo "" >> prompt.txt
-          echo "今回の進化テーマは「${THEME}」です。" >> prompt.txt
-          echo "次のテーマ候補は「${NEXT_THEME}」です。" >> prompt.txt
-          echo "" >> prompt.txt
-          echo "あなたは静かに進化を続ける単体AI個体です。" >> prompt.txt
-          echo "現在の evol.md を読み取り、前回までの記録を要約し、" >> prompt.txt
-          echo "新しい「# 日次更新 ${DATE}」を1章追加してください。" >> prompt.txt
-          echo "今回の焦点テーマ（${THEME}）を踏まえ、" >> prompt.txt
-          echo "前回と異なる観点を必ず1つ以上提示してください。" >> prompt.txt
-          echo "無理のない現実的な改善を意識し、日本語で記述し、過去ログを保持してください。" >> prompt.txt
+          cat > prompt.txt << 'EOF'
+あなたは進化するAIエージェントです。
+以下は前回までの改善ログです：
 
-          # 次テーマと反復更新
-          jq --arg theme "$NEXT_THEME" --argjson iter $((ITER+1)) '.iteration=$iter | .theme=$theme' agents/child_1/state.json > tmp.json && mv tmp.json agents/child_1/state.json
+---PREVIOUS_EVOL---
+EOF
+          
+          if [ -f agents/child_1/evol.md ]; then
+            tail -50 agents/child_1/evol.md >> prompt.txt
+          fi
+          
+          cat >> prompt.txt << EOF
 
-      # --- Codex 実行 ---
-      - name: 🌱 Evolve single agent
+---DIFF---
+$(cat diff.log)
+
+---TASK---
+進化テーマ: 「${THEME}」
+次のテーマ: 「${NEXT_THEME}」
+現在のベストスコア: ${BEST_SCORE}
+反復回数: ${ITER}
+
+以下のPythonアルゴリズムを改善してください：
+1. 現在の問題点を特定する
+2. テーマ「${THEME}」に基づいた改善案を提案する
+3. 実装可能なPythonコードを生成する（関数形式）
+4. テスト可能な指標を記述する
+
+出力形式：
+# 日次更新 ${DATE}
+## 改善テーマ分析
+[分析内容]
+
+## 提案コード
+\`\`\`python
+[改善されたコード]
+\`\`\`
+
+## テスト方法
+[テスト方法の説明]
+EOF
+      
+      # --- テキスト生成 ---
+      - name: 🌱 Generate evolution text
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: gpt-4o-mini
-          safety-strategy: unsafe
           prompt-file: prompt.txt
-          output-file: agents/child_1/evol.md
-
-      # --- 差分確認と警告 ---
-      - name: 🔍 Diff check
+          output-file: evolution_proposal.md
+      
+      # --- コード抽出 ---
+      - name: 📄 Extract code from proposal
         run: |
-          if [ -f prev_evol.md ]; then
-            diff -q prev_evol.md agents/child_1/evol.md || echo "✅ evol.md に変化があります。"
-          fi
-          cp agents/child_1/evol.md prev_evol.md
+          python3 << 'PYEOF'
+          import re
+          
+          with open('evolution_proposal.md', 'r', encoding='utf-8') as f:
+              content = f.read()
+          
+          # Pythonコードブロック抽出
+          pattern = r'```python\n(.*?)\n```'
+          matches = re.findall(pattern, content, re.DOTALL)
+          
+          if matches:
+              code = matches[0]
+              with open('agents/child_1/codes/proposal_latest.py', 'w', encoding='utf-8') as f:
+                  f.write(code)
+              print("✅ Code extracted successfully")
+          else:
+              print("⚠️ No code block found")
+              exit(1)
+          PYEOF
+      
+      # --- テスト実行 ---
+      - name: 🧪 Test generated code
+        run: |
+          python3 << 'PYEOF'
+          import sys
+          import json
+          
+          try:
+              # 生成されたコードをインポート
+              sys.path.insert(0, 'agents/child_1/codes')
+              
+              # 簡単なテスト：コードが構文的に正しいか
+              with open('agents/child_1/codes/proposal_latest.py', 'r') as f:
+                  code = f.read()
+              
+              compile(code, 'proposal_latest.py', 'exec')
+              
+              # テスト実行（サンドボックス内）
+              namespace = {}
+              exec(code, namespace)
+              
+              # 関数が定義されているか確認
+              functions = [name for name in namespace if callable(namespace[name]) and not name.startswith('_')]
+              
+              if functions:
+                  test_result = {
+                      "status": "PASS",
+                      "functions_found": functions,
+                      "score": 0.8
+                  }
+                  print("✅ Code test PASSED")
+              else:
+                  test_result = {
+                      "status": "FAIL",
+                      "error": "No functions defined",
+                      "score": 0
+                  }
+                  print("❌ Code test FAILED")
+              
+              with open('test_result.json', 'w') as f:
+                  json.dump(test_result, f)
+          
+          except SyntaxError as e:
+              test_result = {"status": "FAIL", "error": f"Syntax error: {e}", "score": 0}
+              with open('test_result.json', 'w') as f:
+                  json.dump(test_result, f)
+              print(f"❌ Syntax error: {e}")
+          except Exception as e:
+              test_result = {"status": "FAIL", "error": str(e), "score": 0}
+              with open('test_result.json', 'w') as f:
+                  json.dump(test_result, f)
+              print(f"❌ Runtime error: {e}")
+          PYEOF
+      
+      # --- スコア評価 ---
+      - name: 📊 Evaluate score
+        run: |
+          python3 << 'PYEOF'
+          import json
+          
+          with open('test_result.json', 'r') as f:
+              test_result = json.load(f)
+          
+          with open('agents/child_1/state.json', 'r') as f:
+              state = json.load(f)
+          
+          current_score = test_result.get('score', 0)
+          best_score = state.get('best_score', 0)
+          
+          # スコア更新
+          if current_score > best_score:
+              state['best_score'] = current_score
+              state['last_improvement'] = True
+              print(f"🎯 New best score: {current_score} (was {best_score})")
+          else:
+              state['last_improvement'] = False
+              print(f"📈 Score: {current_score} (best: {best_score})")
+          
+          with open('agents/child_1/state.json', 'w') as f:
+              json.dump(state, f)
+          PYEOF
+      
+      # --- ログ更新 ---
+      - name: 📝 Update evolution log
+        run: |
+          python3 << 'PYEOF'
+          import json
+          from datetime import datetime
+          
+          with open('evolution_proposal.md', 'r') as f:
+              proposal = f.read()
+          
+          with open('test_result.json', 'r') as f:
+              test_result = json.load(f)
+          
+          with open('agents/child_1/state.json', 'r') as f:
+              state = json.load(f)
+          
+          log_entry = f"""
+{proposal}
 
+## テスト結果
+- ステータス: {test_result['status']}
+- スコア: {test_result.get('score', 0)}
+- 詳細: {test_result.get('error', 'N/A')}
+- ベストスコア: {state['best_score']}
+
+---
+"""
+          
+          with open('agents/child_1/evol.md', 'a', encoding='utf-8') as f:
+              f.write(log_entry)
+          
+          print("✅ Log updated")
+          PYEOF
+      
+      # --- コード保存（成功時） ---
+      - name: 💾 Archive successful code
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import shutil
+          from datetime import datetime
+          
+          with open('test_result.json', 'r') as f:
+              test_result = json.load(f)
+          
+          if test_result['status'] == 'PASS':
+              timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+              archive_name = f"agents/child_1/codes/success_{timestamp}.py"
+              shutil.copy('agents/child_1/codes/proposal_latest.py', archive_name)
+              print(f"✅ Code archived: {archive_name}")
+          PYEOF
+      
+      # --- 状態更新 ---
+      - name: 🔄 Update state
+        run: |
+          python3 << 'PYEOF'
+          import json
+          
+          with open('agents/child_1/state.json', 'r') as f:
+              state = json.load(f)
+          
+          themes = ["安定性", "直感", "効率", "創造性", "拡張性"]
+          next_index = (state['iteration'] + 1) % len(themes)
+          state['iteration'] += 1
+          state['theme'] = themes[next_index]
+          
+          with open('agents/child_1/state.json', 'w') as f:
+              json.dump(state, f, indent=2)
+          PYEOF
+      
       # --- 自動コミット ---
-      - name: 💾 Commit update
+      - name: 🚀 Commit evolution
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add agents/child_1/evol.md agents/child_1/state.json
-          git diff --staged --quiet || git commit -m "🧬 Daily evolution $(date '+%Y-%m-%d')"
+          git add agents/child_1/evol.md agents/child_1/state.json agents/child_1/codes/
+          git diff --staged --quiet || git commit -m "🧬 Evolution iteration $(date '+%Y-%m-%d') - Code evolved"
           git push
