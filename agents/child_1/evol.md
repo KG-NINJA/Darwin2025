@@ -844,3 +844,58 @@ def apply_operations(data, operations):
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-11-06
+
+## 改善テーマ分析
+現行のコードは数値処理において冗長な条件判断が多く、パフォーマンス低下を招いています。特に、各操作を項目ごとに適用する際に、ネストされたループが必要以上に稼働しており、全体的な処理の効率が悪化しています。無駄な計算を避けつつ、より直感的で可読性の高いコードにリファクタリングすることを目指します。
+
+## 提案コード
+```python
+def validate_numerical_input(data):
+    """入力データの妥当性を確認し、エラーをスロー"""
+    if not isinstance(data, list):
+        raise ValueError("入力はリストである必要があります。")
+    if not all(isinstance(i, (int, float)) for i in data):
+        raise ValueError("すべての要素は数値である必要があります。")
+
+def double(item): return item * 2
+def square(item): return item ** 2
+def increment(item): return item + 1
+
+operation_map = {
+    "double": double,
+    "square": square,
+    "increment": increment
+}
+
+def apply_operations(data, operations):
+    """指定された操作をデータに適用"""
+    validate_numerical_input(data)
+
+    # 有効な数値のみを抽出
+    valid_data = [item for item in data if item > 0]
+    
+    results = []
+    for item in valid_data:
+        results.extend(operation_map[op](item) for op in operations if op in operation_map)
+    return results
+```
+
+## テスト方法
+1. **入力データ検証**:
+   - 入力データがリストであることを確認するテストを実行し、数値以外の要素含有時にエラーメッセージが表示されるか確認します。
+
+2. **操作適用の安定性**:
+   - 操作が正しい順序で適用され、結果が予想通りとなることを確認します。
+
+3. **効率検証**:
+   - 負の数やゼロを除外する処理が正常に実行されること、及び各操作の結果が正確であることをテストします。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
