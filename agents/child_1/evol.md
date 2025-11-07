@@ -899,3 +899,64 @@ def apply_operations(data, operations):
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-11-07
+
+## 改善テーマ分析
+現在のコードは、リスト内の各要素に対して操作を適用する方式であり、拡張性が低いです。新しい操作を追加する際、`operation_map`への手動更新が必要で、これに伴い保守性が悪化します。また、リスト全体を処理する際のフィルタリングロジックはシンプルですが、拡張性を持たせながら、可読性とパフォーマンスを保つことが求められます。
+
+## 提案コード
+```python
+class Operation:
+    """操作を表す基本クラス"""
+    def apply(self, item):
+        raise NotImplementedError("必ず派生クラスで実装してください。")
+
+class Double(Operation):
+    def apply(self, item):
+        return item * 2
+
+class Square(Operation):
+    def apply(self, item):
+        return item ** 2
+
+class Increment(Operation):
+    def apply(self, item):
+        return item + 1
+
+def apply_operations(data, operations):
+    """指定された操作をデータに適用"""
+    validate_numerical_input(data)
+
+    # 有効な数値のみを抽出
+    valid_data = [item for item in data if item > 0]
+
+    results = []
+    operation_map = {op.__class__.__name__.lower(): op for op in operations}
+    
+    for item in valid_data:
+        for operation in operations:
+            results.append(operation_map[operation.__class__.__name__.lower()].apply(item))
+    return results
+```
+
+## テスト方法
+1. **入力データ検証**:
+   - 入力データがリストであることを確認し、数値以外の要素が含まれた場合に正しいエラーメッセージが表示されるか検証します。
+
+2. **操作適用の拡張性**:
+   - 操作を新たに追加可能か確認します（例: `Operation`クラスを拡張した新しい操作を追加し、正しく機能するかテスト）。
+
+3. **操作適用の安定性**:
+   - 各操作が正確に適用され、結果が予想通りであることを確認します。
+
+4. **効率検証**:
+   - 負の数やゼロを正常に除外し、各操作の結果が正確であることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
