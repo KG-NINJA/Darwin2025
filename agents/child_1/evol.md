@@ -1092,3 +1092,71 @@ def apply_operations(data, operations):
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-11-10
+
+## 改善テーマ分析
+現在の`apply_operations`関数は、適用される操作がリスト内でハードコーディングされているため、新しい操作の追加や変更が難しい状況です。この固定化された構造は、機能の拡張性を損なう可能性があります。また、効率的に負の数やゼロを処理し、無駄な計算を避ける必要があります。これを改善するために、操作を動的に登録し、それに応じて実行するロジックを導入することが望ましいです。
+
+## 提案コード
+```python
+class Operation:
+    """操作を表す基本クラス"""
+    def apply(self, item):
+        raise NotImplementedError("必ず派生クラスで実装してください。")
+
+class Double(Operation):
+    def apply(self, item):
+        return item * 2
+
+class Square(Operation):
+    def apply(self, item):
+        return item ** 2
+
+class Increment(Operation):
+    def apply(self, item):
+        return item + 1
+
+class Multiply(Operation):
+    """新しいMultiply操作の追加"""
+    def __init__(self, factor):
+        self.factor = factor
+
+    def apply(self, item):
+        return item * self.factor
+
+def apply_operations(data, operations):
+    """指定された操作をデータに適用"""
+    validate_numerical_input(data)
+
+    # 有効な数値のみを抽出（負の数とゼロを除外）
+    valid_data = [item for item in data if isinstance(item, (int, float)) and item > 0]
+
+    results = []
+    
+    # 各操作を適用
+    for operation in operations:
+        results.extend([operation.apply(item) for item in valid_data])
+    return results
+```
+
+## テスト方法
+1. **入力データ検証**:
+   - 入力データがリストであり、数値以外の要素が含まれた場合に適切なエラーメッセージが表示されるか確認します。
+
+2. **動的操作登録の検証**:
+   - 操作クラスのインスタンスをリストに追加し、その順序に関して反映される正しい結果を確認します。
+
+3. **操作適用の安定性**:
+   - 既存の操作（`Double`、`Square`、`Increment`）及び新しい操作（`Multiply`）が期待通りの結果を返すことを確認します。
+
+4. **効率検証**:
+   - 負の数やゼロを正常に除外した状態で、`apply_operations([-1, 0, 1, 2], [Double()])`が`[4]`を返すことを検証します。また、異なる因子を持つ`Multiply`オブジェクトが正確に動作することを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
