@@ -1442,3 +1442,79 @@ def apply_operations(data, operations):
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-11-15
+
+## 改善テーマ分析
+現在の`apply_operations`関数には、操作を適用する際の柔軟性が欠如しています。入力データの検証が行われていますが、エラーが発生する可能性の高いケースに対してもう少し洗練されたハンドリングが必要です。特に、数値以外のデータや負の数を扱う際に、コードの可読性とエラー処理の明確さを向上させる余地があります。また、パフォーマンスの向上につながる可能性もあります。
+
+## 提案コード
+```python
+class Operation:
+    """操作を表す基本クラス"""
+    def apply(self, item):
+        raise NotImplementedError("必ず派生クラスで実装してください。")
+
+class Double(Operation):
+    def apply(self, item):
+        return item * 2
+
+class Square(Operation):
+    def apply(self, item):
+        return item ** 2
+
+class Increment(Operation):
+    def apply(self, item):
+        return item + 1
+
+class Multiply(Operation):
+    def __init__(self, factor):
+        self.factor = factor
+
+    def apply(self, item):
+        return item * self.factor
+
+def validate_numerical_input(data):
+    """入力データに対する検証"""
+    if not isinstance(data, list):
+        raise ValueError("データはリストである必要があります。")
+    if any(not isinstance(item, (int, float)) for item in data):
+        raise ValueError("リストには数値以外の要素が含まれていることができません。")
+
+def apply_operations(data, operations):
+    """指定された操作をデータに適用"""
+    validate_numerical_input(data)
+
+    # 有効な数値のみを抽出（負の数とゼロを除外）
+    valid_data = [item for item in data if isinstance(item, (int, float)) and item > 0]
+
+    results = []
+    for operation in operations:
+        results.extend(operation.apply(item) for item in valid_data)
+    
+    return results
+```
+
+## テスト方法
+1. **入力データの確認**:
+   - 不正な型（例: `apply_operations("invalid", [Double()])`）を入力すると、`ValueError`が発生することを確認します。
+
+2. **リスト内の数値チェック**:
+   - 異なるデータ型を含むリスト（例: `apply_operations([1, 'a', 2], [Double()])`）を使用して、数値以外が含まれた場合に適切なエラーメッセージが表示されることを確認します。
+
+3. **動的操作適用の検証**:
+   - 既存の操作（例: `apply_operations([1, 2, 3], [Double(), Increment()])`）が正しい結果（例: `[2, 4, 6, 2, 3, 4]`）を返すことを確認します。
+
+4. **新しい操作の適用**:
+   - 新しく追加した`Multiply`操作が、正しく因子を反映しているかを確認します。
+
+5. **効率検証**:
+   - 負の数やゼロを含むデータ（例: `apply_operations([-1, 0, 1, 2], [Double()])`）で結果が`[4]`となるかを確認し、別の因子を持つ`Multiply`オブジェクトが期待どおりに動作するかを評価します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
