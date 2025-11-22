@@ -2091,3 +2091,105 @@ def apply_operations(data: List[float], operations: List[Operation]) -> List[flo
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-11-22
+
+## 改善テーマ分析
+次の改善点に注目します:
+- **拡張性の向上**: 現在の実装が特定の操作に依存しているため、新しい操作を追加する際の柔軟性を高める必要があります。
+- **操作の一元管理**: 各操作が独立してるため、統合的な管理システムを導入してコードの再利用性を向上させます。
+- **設定可能なパラメータ**: 操作ごとにパラメータを設定できるようにし、拡張性を持たせます。
+
+## 提案コード
+以下は、拡張性を考慮してリファクタリングされたコードです。操作を管理するクラスを導入し、各操作を登録 & 実行する形式にしました。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Any, Dict
+
+
+class Operation:
+    """操作を表す基本クラス"""
+    def apply(self, item):
+        raise NotImplementedError("必ず派生クラスで実装してください。")
+
+    def configure(self, *args, **kwargs):
+        """操作の構成を設定するためのメソッド"""
+        pass
+
+
+class Double(Operation):
+    def apply(self, item):
+        return item * 2
+
+    
+class Increment(Operation):
+    def apply(self, item):
+        return item + 1
+
+    
+class OperationManager:
+    """操作を管理するクラス"""
+    def __init__(self):
+        self.operations: Dict[str, Operation] = {}
+
+    def register_operation(self, name: str, operation: Operation):
+        """操作を登録"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[float]) -> List[float]:
+        """登録された全ての操作をデータに適用"""
+        results = []
+        errors = []
+        
+        with ThreadPoolExecutor(max_workers=len(self.operations)) as executor:
+            future_to_operation = {executor.submit(op.apply, item): (item, name)
+                                    for name, op in self.operations.items() 
+                                    for item in data}
+
+            for future in as_completed(future_to_operation):
+                item, operation_name = future_to_operation[future]
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    error_message = f"エラー発生 - 操作: {operation_name} | アイテム: {item} | メッセージ: {e}"
+                    errors.append(error_message)
+
+        if errors:
+            for error in errors:
+                print(error)
+
+        return results
+```
+
+## テスト方法
+1. **操作の登録**:
+   - 複数の操作を`OperationManager`に登録し、各操作が正常に追加されることを確認します。
+   
+2. **操作の実行**:
+   - 登録した操作を使用して、サンプルデータに対して結果が期待通りであることを確認します。
+     - 例: 
+     ```python
+     manager = OperationManager()
+     manager.register_operation("double", Double())
+     manager.register_operation("increment", Increment())
+     results = manager.run_operations([1, 2, 3])
+     assert results == [2, 4, 6]  # Double applied
+     ```
+   
+3. **エラーハンドリングの確認**:
+   - 操作内でエラーが発生する際に、詳細なエラーメッセージが表示されることを確認します。
+
+4. **新規操作の追加**:
+   - 他の操作（例: `Square`）を新たに追加しても、簡単に登録し使用できることを確認します。
+
+5. **パフォーマンス測定**:
+   - 大規模データセット（例: 10000個のランダムな数値）を用いて性能を測定し、効率が向上していることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
