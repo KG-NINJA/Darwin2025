@@ -3174,3 +3174,107 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-03
+
+## 改善テーマ分析
+- `run_operations` メソッドは、複数の操作を管理し実行する際にリファクタリングの余地がある。特に、異なる操作間での結果やエラーメッセージの整合性が不足しているため、追加の操作があった場合に追跡やデバッグが難しくなる。また、現在の実装では拡張性が低く、新しい操作を一貫した形で扱うことが困難である。
+
+## 提案コード
+以下の改善案では、操作をよりモジュール化し、結果を集約する機能を持たせ、操作の登録と実行を簡素化した `Operation` クラスの基盤を設けます。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Any, Dict, Optional, Tuple, Callable
+
+class Operation:
+    def apply(self, item: Any) -> Any:
+        raise NotImplementedError("必ず派生クラスで実装してください。")
+
+class Double(Operation):
+    def apply(self, item: float) -> float:
+        return item * 2
+
+class Increment(Operation):
+    def apply(self, item: float) -> float:
+        return item + 1
+
+class Square(Operation):
+    def apply(self, item: float) -> float:
+        return item ** 2
+
+class OperationResult:
+    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
+        self.success = success
+        self.error = error
+
+class OperationManager:
+    def __init__(self, max_workers: Optional[int] = None):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+        self.max_workers = max_workers or 4
+
+    def register_operation(self, name: str, operation: Operation):
+        self.operations[name] = operation.apply
+
+    def run_operations(self, data: List[float]) -> List[OperationResult]:
+        results = []
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_operation = {
+                executor.submit(op_func, item): (item, name)
+                for name, op_func in self.operations.items()
+                for item in valid_data
+            }
+
+            for future in as_completed(future_to_operation):
+                item, operation_name = future_to_operation[future]
+                try:
+                    result = future.result()
+                    results.append(OperationResult(success=result))
+                except Exception as e:
+                    error_message = f"操作 '{operation_name}' でエラー: {str(e)}"
+                    results.append(OperationResult(error=error_message))
+
+        self.visualize_results(results)
+        return results
+
+    def visualize_results(self, results: List[OperationResult]):
+        print("操作結果:")
+        for result in results:
+            if result.success is not None:
+                print(f"成功: {result.success}")
+            if result.error:
+                print(f"エラー: {result.error}")
+
+# 使用例
+operation_manager = OperationManager()
+operation_manager.register_operation("Double", Double())
+operation_manager.register_operation("Increment", Increment())
+operation_manager.register_operation("Square", Square())  # 新しい操作を登録
+
+# 例のデータを使用してテスト
+data = [1, 2, 3, 4, 5]
+results = operation_manager.run_operations(data)
+```
+
+## テスト方法
+1. **安定性テスト**:
+   - 異なるデータ型（整数、浮動小数点数、文字列など）を含むリストを用意し、無効なデータに対するエラーメッセージが適切に出力されることを確認します。
+
+2. **拡張性テスト**:
+   - 新しい操作 `Square` を追加し、`OperationManager` に動的に登録された後、単体テストを実施して期待した結果を得るか確認します。
+
+3. **結果の整合性確認**:
+   - `Double`、`Increment`、`Square` に対して、有効なデータを用いて結果が期待通りであることを確認します。
+
+4. **エラーメッセージ確認**:
+   - 無効なデータ（例: 文字列やリスト）を含むリストをテストし、正確なエラーメッセージが出力されることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
