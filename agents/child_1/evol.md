@@ -3886,3 +3886,131 @@ results = operation_manager.run_operations(data)
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-09
+
+## 改善テーマ分析
+現在の `OperationManager` は、さまざまな操作を同時に実行するためのスレッド管理を行っていますが、安定性の面でいくつかの問題があります。具体的には以下の点が挙げられます。
+
+- 無効データのハンドリングが一貫していないため、処理中にエラーが発生の可能性が高い。
+- 複数の操作が同時に実行される場合、エラーが発生することがあり、そのエラーメッセージの可読性が低い。
+- スレッド使用時のリソース管理が不十分なため、場合によってはスレッドが適切に解放されないことがあります。
+
+これらの問題を踏まえ、以下の改善を提案します。
+
+## 提案コード
+以下の改善点を実装したコードを提案します。
+
+1. 無効なデータを処理する前にフィルタリングを強化する。
+2. エラーメッセージを具体的に、かつ分かりやすくする。
+3. スレッドのリソース管理を改善するため、`with` 文を用いた明示的な管理を保持。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Optional, Dict, Callable, Any
+
+class Operation:
+    def apply(self, item: float) -> float:
+        raise NotImplementedError("This method should be overridden.")
+
+class Double(Operation):
+    def apply(self, item: float) -> float:
+        return item * 2
+
+class Increment(Operation):
+    def apply(self, item: float) -> float:
+        return item + 1
+
+class Cube(Operation):
+    def apply(self, item: float) -> float:
+        return item ** 3
+
+class OperationResult:
+    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
+        self.success = success
+        self.error = error
+
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+
+    def register_operation(self, name: str, operation: Operation):
+        self.operations[name] = operation.apply
+
+    def run_operations(self, data: List[Any]) -> List[OperationResult]:
+        results = []
+        valid_data = self.validate_data(data)
+
+        if not valid_data:
+            return results
+
+        max_workers = min(len(valid_data), 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_operation = {
+                executor.submit(op_func, item): (item, name)
+                for name, op_func in self.operations.items()
+                for item in valid_data
+            }
+
+            for future in as_completed(future_to_operation):
+                item, operation_name = future_to_operation[future]
+                try:
+                    result = future.result()
+                    results.append(OperationResult(success=result))
+                except Exception as e:
+                    error_message = f"操作 '{operation_name}' でエラー: {str(e)}, データ: {item}"
+                    results.append(OperationResult(error=error_message))
+
+        self.visualize_results(results, invalid_data=data)
+        return results
+
+    def validate_data(self, data: List[Any]) -> List[float]:
+        return [item for item in data if isinstance(item, (int, float))]
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        print("操作結果:")
+        for result in results:
+            if result.success is not None:
+                print(f"成功: {result.success}")
+            if result.error:
+                print(f"エラー: {result.error}")
+
+        if invalid_data:
+            print("スキップされた無効なデータ:")
+            for item in invalid_data:
+                if not isinstance(item, (int, float)):
+                    print(f"無効なデータ: {item}")
+
+# 使用例
+operation_manager = OperationManager()
+operation_manager.register_operation("Double", Double())
+operation_manager.register_operation("Increment", Increment())
+operation_manager.register_operation("Cube", Cube())
+
+data = [1, 2, 3, 'invalid', 4, 5] 
+results = operation_manager.run_operations(data)
+```
+
+## テスト方法
+1. **拡張性テスト**:
+   - `Cube`, `Double`, `Increment` 操作が期待通りに動作することを確認します。具体的には `Cube(3)` が `27` になるかを検証します。
+   
+2. **安定性テスト**:
+   - 有効なデータと無効なデータを混ぜたリストを使用し、無効なデータが適切にスキップされることを確認します。エラーメッセージが意図した通りに出力されるかもチェックします。
+
+3. **スレッド管理の確認**:
+   - 有効データの数に応じてスレッドの数が適切に自動調整されるかを確認します。
+
+4. **結果の整合性テスト**:
+   - 各有効データに対して期待される操作の結果が正しいことを確認します（例: `Double(2)` は `4` になるべき）。
+
+5. **無効データのハンドリング確認**:
+   - 無効データを含むリストを使用し、正しいエラーメッセージが出力されることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
