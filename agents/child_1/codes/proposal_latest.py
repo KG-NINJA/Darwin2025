@@ -1,9 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Dict, Callable, Any
-
-class Operation:
-    def apply(self, item: float) -> float:
-        raise NotImplementedError("This method should be overridden.")
+from typing import Any, Callable, Dict, List, Optional
 
 class Double(Operation):
     def apply(self, item: float) -> float:
@@ -31,10 +27,7 @@ class OperationManager:
 
     def run_operations(self, data: List[Any]) -> List[OperationResult]:
         results = []
-        valid_data = self.validate_data(data)
-
-        if not valid_data:
-            return results
+        valid_data, invalid_data = self.validate_data(data)
 
         max_workers = min(len(valid_data), 4)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -53,11 +46,18 @@ class OperationManager:
                     error_message = f"操作 '{operation_name}' でエラー: {str(e)}, データ: {item}"
                     results.append(OperationResult(error=error_message))
 
-        self.visualize_results(results, invalid_data=data)
+        self.visualize_results(results, invalid_data=invalid_data)
         return results
 
     def validate_data(self, data: List[Any]) -> List[float]:
-        return [item for item in data if isinstance(item, (int, float))]
+        valid = []
+        invalid = []
+        for item in data:
+            if isinstance(item, (int, float)):
+                valid.append(item)
+            else:
+                invalid.append(item)
+        return valid, invalid
 
     def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
         print("操作結果:")
@@ -70,8 +70,7 @@ class OperationManager:
         if invalid_data:
             print("スキップされた無効なデータ:")
             for item in invalid_data:
-                if not isinstance(item, (int, float)):
-                    print(f"無効なデータ: {item}")
+                print(f"無効なデータ: {item}")
 
 # 使用例
 operation_manager = OperationManager()
