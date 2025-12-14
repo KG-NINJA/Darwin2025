@@ -4479,3 +4479,124 @@ results = operation_manager.run_operations(data)
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-14
+
+## 改善テーマ分析
+現在の`OperationManager`クラスは、以下の問題点を抱えています:
+- **エラーハンドリングの不十分さ**: エラーが発生した際に、単一のログエントリで処理されています。特定のエラーを捕捉することで、より詳細な情報を得られるように改善する必要があります。
+- **スレッド管理の限界**: スレッド数の設定はデフォルトで最大4ですが、これが必ずしも最適とは限りません。また、スレッド数がデータの量に応じて適切に調整されていない場合もあります。
+- **データの整合性**: 有効データと無効データを別々にログに記録し、ユーザーにわかりやすくフィードバックできるようにします。
+
+## 提案コード
+以下のコードは、上記の問題点を改善するために変更された`OperationManager`クラスです。特に、エラーを特定し、より良いスレッド管理とログの出力を行います。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Callable, Any, Optional
+
+class Operation:
+    def apply(self, item: float) -> float:
+        raise NotImplementedError("This method should be overridden in subclasses.")
+
+class Increment(Operation):
+    def apply(self, item: float) -> float:
+        return item + 1
+
+class Cube(Operation):
+    def apply(self, item: float) -> float:
+        return item ** 3
+
+class Square(Operation):
+    def apply(self, item: float) -> float:
+        return item ** 2
+
+class OperationResult:
+    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
+        self.success = success
+        self.error = error
+
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+
+    def register_operation(self, name: str, operation: Operation):
+        self.operations[name] = operation.apply
+
+    def run_operations(self, data: List[Any]) -> List[OperationResult]:
+        results = []
+        valid_data, invalid_data = self.validate_data(data)
+
+        max_workers = min(len(valid_data), len(self.operations))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_item = {
+                executor.submit(self.execute_operation, op_func, item): (item, name)
+                for name, op_func in self.operations.items()
+                for item in valid_data
+            }
+
+            for future in as_completed(future_to_item):
+                item, operation_name = future_to_item[future]
+                try:
+                    result = future.result()
+                    results.append(OperationResult(success=result))
+                except Exception as e:
+                    self.log_error(e, operation_name, item, results)
+
+        self.visualize_results(results, invalid_data)
+        return results
+
+    def execute_operation(self, op_func: Callable[[Any], float], item: Any) -> float:
+        return op_func(item)
+
+    def validate_data(self, data: List[Any]) -> List[float]:
+        valid = []
+        invalid = []
+        for item in data:
+            if isinstance(item, (int, float)):
+                valid.append(item)
+            else:
+                invalid.append(item)
+        return valid, invalid
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        print("操作結果:")
+        for result in results:
+            if result.success is not None:
+                print(f"成功: {result.success}")
+            if result.error:
+                print(f"エラー: {result.error}")
+
+        if invalid_data:
+            print("スキップされた無効なデータ:")
+            for item in invalid_data:
+                print(f"無効なデータ: {item}")
+
+    def log_error(self, e: Exception, operation_name: str, item: Any, results: List[OperationResult]):
+        error_message = f"操作 '{operation_name}' でエラー：{str(e)} (データ: {item})"
+        results.append(OperationResult(error=error_message))
+
+# 使用例
+operation_manager = OperationManager()
+operation_manager.register_operation("Increment", Increment())
+operation_manager.register_operation("Cube", Cube())
+operation_manager.register_operation("Square", Square())
+
+data = [1, 2, 3, 'invalid', 4, 5]
+results = operation_manager.run_operations(data)
+```
+
+## テスト方法
+1. **拡張性テスト**: `Square`クラスを用いて新しい操作を登録し、テストが成功することを確認します。
+2. **安定性テスト**: 有効データ及び無効データを含むリストを使用して、スレッド実行中のエラー処理が適切であるか確認します。エラーメッセージが正確にログに記録されることを検証します。
+3. **スレッド管理の確認**: 有効データの数に従ってスレッド数が適切に調整され、必要に応じて性能向上が見られるか確認します。
+4. **結果の整合性テスト**: 各有効データが期待される結果を返すことを確認します。また、視覚化出力が正しいかも検証します。
+5. **無効データのハンドリング確認**: 無効データに対するエラーメッセージが適切に表示され、正確なログが更新されるかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
