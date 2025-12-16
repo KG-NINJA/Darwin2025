@@ -4717,3 +4717,115 @@ results = operation_manager.run_operations(data)
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-16
+
+## 改善テーマ分析
+現在のコードは有効データの処理において安定していますが、以下の問題点が見受けられます：
+- **パフォーマンスの最適化**：複数の操作が同時に実行される場合に、スレッドプールの活用が不十分です。スレッドの最適な数を動的に決定する余地があります。
+- **エラー処理の冗長性**：エラー処理が多くの場所で繰り返され、コードが冗長になっています。
+- **新しい操作の追加が面倒**：操作クラスの追加が毎回手動で`register_operation`メソッドで行う必要があります。
+
+## 提案コード
+以下は改善案を実装したPythonコードです。スレッドの最適化と冗長性の削減を目指します。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Callable, Any, Optional
+
+class Operation:
+    def apply(self, item: float) -> float:
+        raise NotImplementedError
+
+class Increment(Operation):
+    def apply(self, item: float) -> float:
+        return item + 1
+
+class Cube(Operation):
+    def apply(self, item: float) -> float:
+        return item ** 3
+
+class Square(Operation):
+    def apply(self, item: float) -> float:
+        return item ** 2
+
+class OperationResult:
+    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
+        self.success = success
+        self.error = error
+
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], float]] = {}
+
+    def register_operation(self, name: str, operation: Operation):
+        self.operations[name] = operation.apply
+
+    def run_operations(self, data: List[Any]) -> List[OperationResult]:
+        results = []
+        valid_data, invalid_data = self.validate_data(data)
+
+        max_workers = min(len(valid_data), len(self.operations))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(op_func, item): (item, name)
+                for name, op_func in self.operations.items()
+                for item in valid_data
+            }
+
+            for future in as_completed(futures):
+                item, operation_name = futures[future]
+                results.append(self.handle_future_result(future, operation_name, item))
+
+        self.visualize_results(results, invalid_data)
+        return results
+
+    def handle_future_result(self, future, operation_name: str, item: Any) -> OperationResult:
+        try:
+            result = future.result()
+            return OperationResult(success=result)
+        except Exception as e:
+            return OperationResult(error=f"操作 '{operation_name}' でエラー：{str(e)} (データ: {item})")
+
+    def validate_data(self, data: List[Any]) -> (List[float], List[Any]):
+        valid = [item for item in data if isinstance(item, (int, float))]
+        invalid = [item for item in data if not isinstance(item, (int, float))]
+        return valid, invalid
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        print("操作結果:")
+        for result in results:
+            if result.success is not None:
+                print(f"成功: {result.success}")
+            if result.error:
+                print(f"エラー: {result.error}")
+
+        if invalid_data:
+            print("スキップされた無効なデータ:")
+            for item in invalid_data:
+                print(f"無効なデータ: {item}")
+
+# 使用例
+operation_manager = OperationManager()
+operation_manager.register_operation("Increment", Increment())
+operation_manager.register_operation("Cube", Cube())
+operation_manager.register_operation("Square", Square())
+
+data = [1, 2, 3, 'invalid', 4, 5]
+results = operation_manager.run_operations(data)
+```
+
+## テスト方法
+1. **拡張性テスト**：新しい操作（例: `Subtract`クラス）を追加し、`register_operation()`を経由して機能することを確認します。
+2. **安定性テスト**：多様な有効・無効データセットを使い、エラー処理の信頼性を確認します。エラーメッセージが正確に表示されることを確認します。
+3. **スレッド管理の確認**：スレッドの数を異なるデータ数で観察し、最適なスレッドプールサイズが機能しているか確認します。
+4. **結果の整合性テスト**：各有効データの処理結果が正確であることを確認します。
+5. **無効データのハンドリング確認**：無効データに対し、正しいエラーメッセージが表示されるかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
