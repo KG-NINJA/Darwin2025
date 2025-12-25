@@ -5762,3 +5762,120 @@ results = operation_manager.run_operations(data)
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-25
+
+## 改善テーマ分析
+現在の`OperationManager`クラスは、データ検証、スレッドプールの管理、結果の視覚化とログ書き出しを担当していますが、いくつかの改善点があります。
+1. **エラーハンドリング**: エラーメッセージが明確すぎないため、エラーの原因を特定しにくいです。
+2. **ログの可読性**: 読みやすいフォーマットでログを記入する必要があります。
+3. **スレッドプール**: 最大スレッド数の管理が固定的で、柔軟性に欠けます。
+4. **結果の視覚化**: 結果がコンソールに表示されるが、より洗練されたビジュアルが必要です。
+
+## 提案コード
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Union, Callable, Dict, Any
+
+class OperationResult:
+    def __init__(self, success=None, error=None):
+        self.success = success
+        self.error = error
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, item: Union[int, float]) -> float:
+        return self.func(item)
+
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Operation] = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str = "Unknown"):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def run_operations(self, data: List[Union[int, float]]) -> List[OperationResult]:
+        results = []
+        valid_data, invalid_data = self.validate_data(data)
+
+        with ThreadPoolExecutor(max_workers=min(5, len(valid_data))) as executor:
+            futures = {executor.submit(op.apply, item): (item, op.name)
+                       for op in self.operations.values() for item in valid_data}
+
+            for future in as_completed(futures):
+                item, operation_name = futures[future]
+                results.append(self.handle_future_result(future, operation_name, item))
+
+        self.visualize_results(results, invalid_data)
+        return results
+
+    def validate_data(self, data: List[Any]) -> (List[float], List[Any]):
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [item for item in data if not isinstance(item, (int, float))]
+        return valid_data, invalid_data
+
+    def handle_future_result(self, future, operation_name: str, item: Any) -> OperationResult:
+        try:
+            result = future.result()
+            return OperationResult(success=result)
+        except Exception as e:
+            error_message = f"Operation '{operation_name}' failed with: {str(e)} (Data: {item})"
+            return OperationResult(error=error_message)
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        summary = []
+        with open('results_log.txt', 'a') as log_file:
+            for result in results:
+                if result.success is not None:
+                    summary_line = f"Success: {result.success}"
+                    log_file.write(f"{summary_line}\n")
+                    summary.append(summary_line)
+                if result.error:
+                    summary_line = f"Error: {result.error}"
+                    log_file.write(f"{summary_line}\n")
+                    summary.append(summary_line)
+
+            if invalid_data:
+                log_file.write("Skipped invalid data:\n")
+                for item in invalid_data:
+                    log_file.write(f"Invalid data: {item}\n")
+                    summary.append(f"Invalid data: {item}")
+
+        # Improved rendering
+        print("\n".join(summary))
+
+# Usage example
+operation_manager = OperationManager()
+operation_manager.register_operation(lambda x: x + 1, "Increment")
+operation_manager.register_operation(lambda x: x ** 3, "Cube")
+operation_manager.register_operation(lambda x: x ** 2, "Square")
+
+data = [1, 2, 3, 'invalid', 4, 5]
+results = operation_manager.run_operations(data)
+```
+
+## テスト方法
+1. **エラー処理テスト**:
+   - 無効なデータを含むリスト（例: `data = [1, 2, 'invalid', 3]`）を渡し、エラーメッセージが`results_log.txt`に記録されていることを確認します。
+2. **操作登録テスト**:
+   - 同一名の操作を再登録しようとした場合に`ValueError`が発生することを確認します。
+3. **スレッド管理の確認**:
+   - 大規模なデータセット（1000アイテム以上）を用いて、スレッドプールが正しく調整され、全操作が実行されることを確認します。
+4. **正常データシナリオ**:
+   - 有効なデータのみを使用して、結果が期待通りに処理されることを確認します。
+5. **視覚的結果の確認**:
+   - `results_log.txt`ファイル及びコンソールでの出力が一致し、エラーメッセージが明確に表示されることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
