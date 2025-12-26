@@ -5879,3 +5879,112 @@ results = operation_manager.run_operations(data)
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-26
+
+## 改善テーマ分析
+現在のアルゴリズムはデータの検証、操作の登録、実行結果の取得を行っていますが、次の点に改善の余地があります：
+
+- **データ検証の処理時間**: 有効データと無効データを同時に処理することで、処理効率を向上できる。
+- **エラーハンドリングの簡素化**: エラーメッセージの生成を一元化することで、コードの可読性を向上させられる。
+- **スレッドプールの最大ワーカー数の動的設定**: ワーカー数をデータサイズに基づいて動的に調整し、パフォーマンスを最適化する。
+
+## 提案コード
+以下に上記の問題点を改善したPythonコードを示します：
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, List, Dict, Union, Any
+
+class OperationResult:
+    def __init__(self, success=None, error=None):
+        self.success = success
+        self.error = error
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, item: Union[int, float]) -> float:
+        return self.func(item)
+
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Operation] = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str = "Unknown"):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def run_operations(self, data: List[Union[int, float]]) -> List[OperationResult]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [item for item in data if not isinstance(item, (int, float))]
+        results = []
+
+        max_workers = min(5, len(valid_data)) if valid_data else 1
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(op.apply, item): (item, op.name)
+                       for op in self.operations.values() for item in valid_data}
+
+            for future in as_completed(futures):
+                item, operation_name = futures[future]
+                results.append(self.handle_future_result(future, operation_name, item))
+
+        self.visualize_results(results, invalid_data)
+        return results
+
+    def handle_future_result(self, future, operation_name: str, item: Any) -> OperationResult:
+        try:
+            result = future.result()
+            return OperationResult(success=result)
+        except Exception as e:
+            return OperationResult(error=self.format_error_message(operation_name, item, e))
+
+    def format_error_message(self, operation_name: str, item: Any, exception: Exception) -> str:
+        return f"Operation '{operation_name}' failed with: {str(exception)} (Data: {item})"
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        summary = []
+        with open('results_log.txt', 'a') as log_file:
+            for result in results:
+                summary_line = f"Success: {result.success}" if result.success is not None else f"Error: {result.error}"
+                log_file.write(f"{summary_line}\n")
+                summary.append(summary_line)
+
+            if invalid_data:
+                log_file.write("Skipped invalid data:\n" + "\n".join(f"Invalid data: {item}" for item in invalid_data))
+
+        print("\n".join(summary))
+
+# Usage example
+operation_manager = OperationManager()
+operation_manager.register_operation(lambda x: x + 1, "Increment")
+operation_manager.register_operation(lambda x: x ** 3, "Cube")
+operation_manager.register_operation(lambda x: x ** 2, "Square")
+
+data = [1, 2, 3, 'invalid', 4, 5]
+results = operation_manager.run_operations(data)
+```
+
+## テスト方法
+1. **エラー処理テスト**:
+   - 無効なデータを含むリスト（例: `data = [1, 2, 'invalid', 3]`）を渡し、エラーメッセージが`results_log.txt`に記録されていることを確認します。
+2. **操作登録テスト**:
+   - 同一名の操作を再登録しようとした場合に`ValueError`が発生することを確認します。
+3. **スレッド管理の確認**:
+   - 大規模なデータセット（1000アイテム以上）を用いて、スレッドプールが最大ワーカー数を動的に調整し、全操作が実行されることを確認します。
+4. **正常データシナリオ**:
+   - 有効なデータのみを使用して、結果が期待通りに処理されることを確認します。
+5. **視覚的結果の確認**:
+   - `results_log.txt`ファイル及びコンソールでの出力が一致し、エラーメッセージが明確に表示されることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
