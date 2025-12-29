@@ -1,8 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, List, Dict, Union, Any
+from typing import Callable, Dict, List, Union, Optional
 
+# 定義済みのクラス
 class OperationResult:
-    def __init__(self, success=None, error=None):
+    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
         self.success = success
         self.error = error
 
@@ -23,17 +24,21 @@ class OperationManager:
             raise ValueError(f"Operation '{name}' is already registered.")
         self.operations[name] = Operation(func, name)
 
-    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str] = None) -> List[OperationResult]:
-        chosen_operations = chosen_operations or self.operations.keys()
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[OperationResult]:
         valid_data = [item for item in data if isinstance(item, (int, float))]
         invalid_data = [item for item in data if not isinstance(item, (int, float))]
         results = []
 
-        max_workers = min(5, len(valid_data)) if valid_data else 1
-        
+        if not valid_data:  # 有効なデータがない場合のチェック
+            return [OperationResult(error="No valid data to process.")]
+
+        max_workers = min(5, len(valid_data))
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self.operations[name].apply, item): (item, name)
-                       for name in chosen_operations if name in self.operations for item in valid_data}
+            futures = {
+                executor.submit(self.operations[name].apply, item): (item, name)
+                for name in chosen_operations if name in self.operations for item in valid_data
+            }
 
             for future in as_completed(futures):
                 item, operation_name = futures[future]
@@ -53,24 +58,21 @@ class OperationManager:
         return f"Operation '{operation_name}' failed with: {str(exception)} (Data: {item})"
 
     def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
-        summary = []
         with open('results_log.txt', 'a') as log_file:
             for result in results:
                 summary_line = f"Success: {result.success}" if result.success is not None else f"Error: {result.error}"
                 log_file.write(f"{summary_line}\n")
-                summary.append(summary_line)
 
             if invalid_data:
                 log_file.write("Skipped invalid data:\n" + "\n".join(f"Invalid data: {item}" for item in invalid_data))
 
-        print("\n".join(summary))
-
-# Usage example
+# 使用例
 def create_operations(manager: OperationManager):
     operations = {
         "Increment": lambda x: x + 1,
         "Cube": lambda x: x ** 3,
-        "Square": lambda x: x ** 2
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x if x != 0 else raise ZeroDivisionError("Cannot divide by zero.")
     }
     for name, func in operations.items():
         manager.register_operation(func, name)
@@ -78,5 +80,5 @@ def create_operations(manager: OperationManager):
 operation_manager = OperationManager()
 create_operations(operation_manager)
 
-data = [1, 2, 3, 'invalid', 4, 5]
-results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube"])
+data = [1, 2, 0, 'invalid', 4, 5]
+results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube", "Safe Divide"])

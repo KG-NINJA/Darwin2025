@@ -6218,3 +6218,118 @@ results = operation_manager.run_operations(data, chosen_operations=["Increment",
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-29
+
+## 改善テーマ分析
+現在のコードは、スレッドプールを利用した操作の実行において、安定性の問題が見受けられます。特に、エラー処理が不十分な場合において、異常系のデータに対するハンドリングが強化されていないため、結果として無効なデータが出力される可能性があります。また、可読性やメンテナンス性を向上させるために、関数の分割や戻り値の型明示化も必要です。
+
+## 提案コード
+以下の改善を実施した`OperationManager`クラスのコードを示します。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, List, Union, Optional
+
+# 定義済みのクラス
+class OperationResult:
+    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
+        self.success = success
+        self.error = error
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, item: Union[int, float]) -> float:
+        return self.func(item)
+
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Operation] = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[OperationResult]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [item for item in data if not isinstance(item, (int, float))]
+        results = []
+
+        if not valid_data:  # 有効なデータがない場合のチェック
+            return [OperationResult(error="No valid data to process.")]
+
+        max_workers = min(5, len(valid_data))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.operations[name].apply, item): (item, name)
+                for name in chosen_operations if name in self.operations for item in valid_data
+            }
+
+            for future in as_completed(futures):
+                item, operation_name = futures[future]
+                results.append(self.handle_future_result(future, operation_name, item))
+
+        self.visualize_results(results, invalid_data)
+        return results
+
+    def handle_future_result(self, future, operation_name: str, item: Any) -> OperationResult:
+        try:
+            result = future.result()
+            return OperationResult(success=result)
+        except Exception as e:
+            return OperationResult(error=self.format_error_message(operation_name, item, e))
+
+    def format_error_message(self, operation_name: str, item: Any, exception: Exception) -> str:
+        return f"Operation '{operation_name}' failed with: {str(exception)} (Data: {item})"
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        with open('results_log.txt', 'a') as log_file:
+            for result in results:
+                summary_line = f"Success: {result.success}" if result.success is not None else f"Error: {result.error}"
+                log_file.write(f"{summary_line}\n")
+
+            if invalid_data:
+                log_file.write("Skipped invalid data:\n" + "\n".join(f"Invalid data: {item}" for item in invalid_data))
+
+# 使用例
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x if x != 0 else raise ZeroDivisionError("Cannot divide by zero.")
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+
+operation_manager = OperationManager()
+create_operations(operation_manager)
+
+data = [1, 2, 0, 'invalid', 4, 5]
+results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube", "Safe Divide"])
+```
+
+## テスト方法
+1. **エラー処理テスト**: 以下のような無効なデータを含むリストを渡し、`results_log.txt`に正しいエラーメッセージが記録されていることを確認します。
+   - 例: `data = [1, 2, 0, 'invalid', 3]` とし、`ZeroDivisionError`がログに記録されることを確認。
+   
+2. **操作登録テスト**: 同一名の操作を再登録することで、`ValueError`が発生することを確認します。
+
+3. **動的操作選択テスト**: `chosen_operations`を使い、特定の操作のみを実行した際、期待通りの結果が得られることを確認します。
+
+4. **スレッド管理の確認**: 大規模データセット（1000アイテム以上）を使用して、スレッドプールが適切に機能していることを確認します。
+
+5. **視覚的結果確認**: `results_log.txt`およびコンソール出力が一致し、エラーメッセージが分かりやすく表示されることを確認します。
+
+## テスト結果
+- ステータス: FAIL
+- スコア: 0
+- 詳細: Syntax error: invalid syntax (proposal_latest.py, line 75)
+- ベストスコア: 0.8
+
+---
