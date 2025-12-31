@@ -1,19 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, List, Optional, Union, Any
-
-class OperationResult:
-    def __init__(self, success: Optional[float] = None, error: Optional[str] = None):
-        self.success = success
-        self.error = error
-
-class Operation:
-    def __init__(self, func: Callable[[float], float], name: str):
-        self.func = func
-        self.name = name
-
-    def apply(self, item: Union[int, float]) -> float:
-        return self.func(item)
-
 class OperationManager:
     def __init__(self):
         self.operations: Dict[str, Operation] = {}
@@ -32,38 +16,46 @@ class OperationManager:
             return [OperationResult(error="No valid data to process.")]
 
         max_workers = min(5, len(valid_data))
+        results_lock = threading.Lock()  # 結果収納のロック
+
+        def worker(item):
+            result = None
+            errors = []
+            for name in chosen_operations:
+                if name not in self.operations:
+                    errors.append(f"Operation '{name}' is not registered.")
+                    continue
+
+                try:
+                    result = self.operations[name].apply(item)
+                except Exception as e:
+                    errors.append(self.format_error_message(name, item, e))
+                    continue
+
+                with results_lock:
+                    results.append(OperationResult(success=result))
+
+            if errors:
+                with results_lock:
+                    for error in errors:
+                        results.append(OperationResult(error=error))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(self.operations[name].apply, item): (item, name)
-                for name in chosen_operations if name in self.operations for item in valid_data
-            }
-
-            for future in as_completed(futures):
-                item, operation_name = futures[future]
-                results.append(self.handle_future_result(future, operation_name, item))
+            executor.map(worker, valid_data)
 
         self.visualize_results(results, invalid_data)
         return results
 
-    def handle_future_result(self, future, operation_name: str, item: Any) -> OperationResult:
-        try:
-            result = future.result()
-            return OperationResult(success=result)
-        except Exception as e:
-            return OperationResult(error=self.format_error_message(operation_name, item, e))
-
-    def format_error_message(self, operation_name: str, item: Any, exception: Exception) -> str:
-        return f"Operation '{operation_name}' failed with: {str(exception)} (Data: {item})"
-
     def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
         with open('results_log.txt', 'a') as log_file:
             for result in results:
-                summary_line = f"Success: {result.success}" if result.success is not None else f"Error: {result.error}"
-                log_file.write(f"{summary_line}\n")
+                if result.success is not None:
+                    log_file.write(f"Success: {result.success}\n")
+                elif result.error:
+                    log_file.write(f"Error: {result.error}\n")
 
             if invalid_data:
-                log_file.write("Skipped invalid data:\n" + "\n".join(f"Invalid data: {item}" for item in invalid_data))
+                log_file.write("Skipped invalid data:\n" + '\n'.join(f"Invalid data: {item}" for item in invalid_data))
 
 # 使用例
 def create_operations(manager: OperationManager):
@@ -71,7 +63,7 @@ def create_operations(manager: OperationManager):
         "Increment": lambda x: x + 1,
         "Cube": lambda x: x ** 3,
         "Square": lambda x: x ** 2,
-        "Safe Divide": lambda x: 10 / x if x != 0 else float('inf')  # 代わりにinfを返す（例外を抑制）
+        "Safe Divide": lambda x: 10 / x if x != 0 else float('inf')
     }
     for name, func in operations.items():
         manager.register_operation(func, name)

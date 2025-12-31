@@ -6454,3 +6454,119 @@ results = operation_manager.run_operations(data, chosen_operations=["Increment",
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2025-12-31
+
+## 改善テーマ分析
+現在のアルゴリズムでは、エラー処理やスレッド管理が基本的に素晴らしいものの、以下の点で効率性が不足しています。
+- **不必要な繰り返し**: 一部の操作は、選択されていない場合でも2回以上呼び出される可能性があります。
+- **エラーログの書き込みの効率化**: ログファイルへの書き込みはスレッドプールの外で行われており、I/O操作によってブロックされることがあります。
+- **無効なデータの扱い**: 現在の実装では無効なデータの扱いが分かりづらく、ログが煩雑になりがちです。
+
+## 提案コード
+以下の改善案を適用して、アルゴリズムをより効率的にします。
+
+```python
+class OperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Operation] = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[OperationResult]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [item for item in data if not isinstance(item, (int, float))]
+        results = []
+
+        if not valid_data:  # 有効なデータがない場合のチェック
+            return [OperationResult(error="No valid data to process.")]
+
+        max_workers = min(5, len(valid_data))
+        results_lock = threading.Lock()  # 結果収納のロック
+
+        def worker(item):
+            result = None
+            errors = []
+            for name in chosen_operations:
+                if name not in self.operations:
+                    errors.append(f"Operation '{name}' is not registered.")
+                    continue
+
+                try:
+                    result = self.operations[name].apply(item)
+                except Exception as e:
+                    errors.append(self.format_error_message(name, item, e))
+                    continue
+
+                with results_lock:
+                    results.append(OperationResult(success=result))
+
+            if errors:
+                with results_lock:
+                    for error in errors:
+                        results.append(OperationResult(error=error))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            executor.map(worker, valid_data)
+
+        self.visualize_results(results, invalid_data)
+        return results
+
+    def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
+        with open('results_log.txt', 'a') as log_file:
+            for result in results:
+                if result.success is not None:
+                    log_file.write(f"Success: {result.success}\n")
+                elif result.error:
+                    log_file.write(f"Error: {result.error}\n")
+
+            if invalid_data:
+                log_file.write("Skipped invalid data:\n" + '\n'.join(f"Invalid data: {item}" for item in invalid_data))
+
+# 使用例
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x if x != 0 else float('inf')
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+
+operation_manager = OperationManager()
+create_operations(operation_manager)
+
+data = [1, 2, 0, 'invalid', 4, 5]
+results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube", "Safe Divide"])
+```
+
+## テスト方法
+1. **エラー処理テスト**:
+   - `data = [1, 2, 0, 'invalid', 3]` とし、`results_log.txt`に"Operation 'Safe Divide' failed with:"として0で行った除算エラーが記録されることを確認します。
+   - "Skipped invalid data: invalid"が正しく記録されることを確認します。
+
+2. **操作登録テスト**:
+   - 同一名の操作を再登録し、`ValueError`が発生することを確認します。
+
+3. **動的操作選択テスト**:
+   - 例えば、`chosen_operations = ["Increment", "Cube"]`とし、選択した通りの結果が得られることを確認します。
+
+4. **スレッド管理の確認**:
+   - 1000アイテム以上の大規模データセットを使用し、スレッドプールが適切に機能しているかチェックします。
+
+5. **視覚的結果確認**:
+   - `results_log.txt`およびコンソール出力が一致し、エラーメッセージが分かりやすく表示されることを確認します。
+
+この変更により、アルゴリズムの効率性が向上し、よりスムーズに動作することが期待されます。
+
+## テスト結果
+- ステータス: FAIL
+- スコア: 0
+- 詳細: name 'Callable' is not defined
+- ベストスコア: 0.8
+
+---
