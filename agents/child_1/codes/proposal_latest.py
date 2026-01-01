@@ -1,6 +1,23 @@
+from typing import Callable, List, Union, Any
+from concurrent.futures import ThreadPoolExecutor
+
+# Operationの結果を保持するクラス
+class OperationResult:
+    def __init__(self, success: Any = None, error: str = None):
+        self.success = success
+        self.error = error
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, value: float) -> float:
+        return self.func(value)
+
 class OperationManager:
     def __init__(self):
-        self.operations: Dict[str, Operation] = {}
+        self.operations = {}
 
     def register_operation(self, func: Callable[[float], float], name: str):
         if name in self.operations:
@@ -12,28 +29,25 @@ class OperationManager:
         invalid_data = [item for item in data if not isinstance(item, (int, float))]
         results = []
 
-        if not valid_data:  # 有効なデータがない場合のチェック
+        if not valid_data:
             return [OperationResult(error="No valid data to process.")]
 
         max_workers = min(5, len(valid_data))
-        results_lock = threading.Lock()  # 結果収納のロック
+        results_lock = threading.Lock()
 
-        def worker(item):
-            result = None
+        def worker(item: Union[int, float]):
             errors = []
             for name in chosen_operations:
                 if name not in self.operations:
-                    errors.append(f"Operation '{name}' is not registered.")
+                    errors.append(f"Error: Operation '{name}' is not registered.")
                     continue
 
                 try:
                     result = self.operations[name].apply(item)
+                    with results_lock:
+                        results.append(OperationResult(success=result))
                 except Exception as e:
-                    errors.append(self.format_error_message(name, item, e))
-                    continue
-
-                with results_lock:
-                    results.append(OperationResult(success=result))
+                    errors.append(f"Operation '{name}' failed with: {str(e)}")
 
             if errors:
                 with results_lock:
