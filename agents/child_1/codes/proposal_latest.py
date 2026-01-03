@@ -1,17 +1,9 @@
-from threading import Lock
+from typing import List, Union, Callable, Any
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, List, Union, Any
-
-class Operation:
-    def __init__(self, func: Callable[[float], float], name: str):
-        self.func = func
-        self.name = name
-
-    def apply(self, x: float) -> float:
-        return self.func(x)
+from threading import Lock
 
 class OperationResult:
-    def __init__(self, success: Union[None, float] = None, error: str = None):
+    def __init__(self, success: Any = None, error: str = None):
         self.success = success
         self.error = error
 
@@ -31,7 +23,9 @@ class OperationManager:
         results = []
 
         if not valid_data:
-            return [OperationResult(error="No valid data to process.")]
+            results.append(OperationResult(error="No valid data to process."))
+            results.extend(self.log_invalid_data(invalid_data))
+            return results
 
         max_workers = min(5, len(valid_data))
         
@@ -46,6 +40,8 @@ class OperationManager:
                     result = self.operations[name].apply(item)
                     with self.lock:
                         results.append(OperationResult(success=result))
+                except ZeroDivisionError:
+                    errors.append(f"Operation '{name}' failed with: division by zero.")
                 except Exception as e:
                     errors.append(f"Operation '{name}' failed with: {str(e)}")
 
@@ -59,6 +55,9 @@ class OperationManager:
 
         self.visualize_results(results, invalid_data)
         return results
+
+    def log_invalid_data(self, invalid_data: List[Any]) -> List[OperationResult]:
+        return [OperationResult(error=f"Skipped invalid data: {item}") for item in invalid_data]
 
     def visualize_results(self, results: List[OperationResult], invalid_data: List[Any]):
         with open('results_log.txt', 'a') as log_file:
