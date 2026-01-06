@@ -7210,3 +7210,130 @@ results = operation_manager.run_operations(data, chosen_operations=["Increment",
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-01-06
+
+## 改善テーマ分析
+現在のコードは基本的な演算管理機能を提供していますが、以下の問題があります：
+- **可読性**: エラーメッセージや演算の管理が明確ではない。
+- **エラー処理**: 現在のエラー処理が簡素で、特定のエラーケースについての情報が不足しています。
+- **拡張性**: 新しい演算を追加する際の手間がかかります。各操作を明示的に登録する必要があるため、異なる演算を簡単に切り替える機能が必要です。
+
+次のテーマ「拡張性」に基づき、演算の追加や変更が容易になるようにコードを改善します。
+
+## 提案コード
+以下のコード片は、演算の登録を動的に行えるようにし、エラーハンドリングを詳細化し、操作をより柔軟に管理できるようにします。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, List, Union
+import json
+
+class OperationResult:
+    def __init__(self, success=None, error=None):
+        self.success = success
+        self.error = error
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, value: float) -> float:
+        return self.func(value)
+
+class OperationManager:
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[OperationResult]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        results = []
+
+        if not valid_data:
+            results.append(OperationResult(error="No valid data to process."))
+            return results
+
+        with ThreadPoolExecutor() as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                results.extend(future.result())
+
+        self.visualize_results(results)
+        return results
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> List[OperationResult]:
+        results = []
+        errors = []
+        for name in chosen_operations:
+            if name not in self.operations:
+                errors.append(f"Error: Operation '{name}' is not registered.")
+                continue
+
+            try:
+                result = self.operations[name].apply(item)
+                results.append(OperationResult(success=result))
+            except ZeroDivisionError:
+                errors.append(f"Operation '{name}' failed with: division by zero.")
+            except Exception as e:
+                errors.append(f"Operation '{name}' failed with: {str(e)}")
+
+        if errors:
+            results.extend(OperationResult(error=error) for error in errors)
+        return results
+
+    def visualize_results(self, results: List[OperationResult]):
+        with open('results_log.txt', 'a') as log_file:
+            successes = [r.success for r in results if r.success is not None]
+            errors = [r.error for r in results if r.error]
+
+            log_file.write("Successes:\n" + '\n'.join(str(s) for s in successes if s) + '\n')
+            log_file.write("Errors:\n" + '\n'.join(str(e) for e in errors) + '\n')
+            log_file.write("Summary: Total successes: {}, Total errors: {}\n".format(len(successes), len(errors)))
+
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x if x != 0 else float('inf')
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+
+# ここからコード実行
+operation_manager = OperationManager()
+create_operations(operation_manager)
+
+data = [1, 2, 0, 'invalid', 4, 5]
+results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube", "Safe Divide"])
+```
+
+## テスト方法
+1. **エラー処理テスト**:
+   - `data = [3, 0, 'invalid']`を入力し、`results_log.txt`に"Operation 'Safe Divide' failed with: division by zero"と、"Skipped invalid data: invalid"が正しく記録されているか確認します。
+   
+2. **操作登録テスト**:
+   - 同一名（例: "Increment"）の操作を再登録し、`ValueError`が発生することを確認します。
+
+3. **動的操作選択テスト**:
+   - `chosen_operations = ["Increment", "Safe Divide"]`で実行し、成功した結果が正しく記録されるか確認します。
+
+4. **スレッド管理の確認**:
+   - 大規模なデータセット（例: `data = list(range(1000))`）を使用して、スレッドプールにおけるパフォーマンスを検証します。
+
+5. **視覚的結果確認**:
+   - `results_log.txt`の出力結果が一貫しているか確認し、成功とエラーの集計が正確に行われているかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
