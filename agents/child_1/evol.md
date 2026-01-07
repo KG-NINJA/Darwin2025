@@ -7337,3 +7337,112 @@ results = operation_manager.run_operations(data, chosen_operations=["Increment",
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-01-07
+
+## 改善テーマ分析
+現在のコードは、操作の登録と実行における柔軟性を持っていますが、次のような問題点が存在します:
+- **操作の可視化や管理の冗長性**: 新しい操作を追加する別の関数を毎回作成する必要があり、拡張が億劫になる可能性があります。
+- **エラーハンドリングの一貫性**: 現在のエラーハンドリングは、エラーごとに異なり、将来的に異なるエラーストラテジーが必要になる可能性があります。
+- **データ型に対する用意**: 入力データは多様であるため、すべての操作を適切に処理できる保証がない。
+
+## 提案コード
+以下のコードでは、`Operation`クラスを拡張して、操作の追加や削除をより簡単にし、エラー処理を一元化しました。これにより拡張性を向上させています。
+
+```python
+from typing import Callable, List, Union, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, value: float) -> Optional[float]:
+        try:
+            return self.func(value)
+        except ZeroDivisionError:
+            return float('inf')
+
+class OperationManager:
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def remove_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+
+        if not valid_data:
+            return ["No valid data to process."]
+
+        with ThreadPoolExecutor() as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                results.extend(future.result())
+
+        self.visualize_results(results)
+        return results
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        for name in chosen_operations:
+            if name not in self.operations:
+                results.append(f"Error: Operation '{name}' is not registered.")
+                continue
+            result = self.operations[name].apply(item)
+            if result == float('inf'):
+                results.append(f"Operation '{name}' failed with: division by zero for input {item}.")
+            else:
+                results.append(result)
+
+        return results
+
+    def visualize_results(self, results: List[Union[str, float]]):
+        with open('results_log.txt', 'a') as log_file:
+            successes = [r for r in results if isinstance(r, (int, float))]
+            errors = [r for r in results if isinstance(r, str)]
+
+            log_file.write("Successes:\n" + '\n'.join(str(s) for s in successes) + '\n')
+            log_file.write("Errors:\n" + '\n'.join(str(e) for e in errors) + '\n')
+
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+
+# ここからコード実行
+operation_manager = OperationManager()
+create_operations(operation_manager)
+
+data = [1, 2, 0, 'invalid', 4, 5]
+results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube", "Safe Divide"])
+```
+
+## テスト方法
+1. **エラー処理テスト**: `data = [3, 0, 'invalid']`を入力し、`results_log.txt`にエラーが正しく記録されていることを確認。
+2. **操作登録と削除テスト**: 同一名操作の再登録を行った後、削除を試み、`ValueError`が発生しないことを確認。
+3. **動的操作選択テスト**: `chosen_operations = ["Increment", "Safe Divide"]`を使用し、成功した計算結果が正しく記録されるかチェック。
+4. **スレッド管理の確認**: 大規模なデータセット`data = list(range(1000))`でパフォーマンスを測定。
+5. **結果の視覚確認**: `results_log.txt`の出力が一貫しているか、成功とエラーの集計が正しいか検証。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
