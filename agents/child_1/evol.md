@@ -7446,3 +7446,110 @@ results = operation_manager.run_operations(data, chosen_operations=["Increment",
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-01-08
+## 改善テーマ分析
+現在の`Operation`と`OperationManager`クラスには、エラー処理の一貫性、スレッド管理のパフォーマンス、及びユーザーによる操作の選択に関しての安定性が不足しています。また、失敗した操作の詳細情報が十分にクライアントに提供されていないのも問題です。そのため、エラーハンドリングの強化や、スレッド管理の効率化が求められます。
+
+## 提案コード
+以下は、安定性を向上させるための改善案です。具体的には、エラーメッセージの詳細化とパフォーマンスを向上させるために、スレッドプールのサイズを管理し、これに対応する方法を実装しました。
+
+```python
+from typing import Callable, List, Union, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+
+    def apply(self, value: float) -> Optional[float]:
+        try:
+            return self.func(value)
+        except ZeroDivisionError:
+            return float('inf')
+
+class OperationManager:
+    def __init__(self, max_workers: int = 4):
+        self.operations = {}
+        self.max_workers = max_workers
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def remove_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+
+        if not valid_data:
+            return ["No valid data to process."]
+
+        # ThreadPoolExecutorのサイズを指定
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                results.extend(future.result())
+
+        self.visualize_results(results)
+        return results
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        for name in chosen_operations:
+            if name not in self.operations:
+                results.append(f"Error: Operation '{name}' is not registered.")
+                continue
+            result = self.operations[name].apply(item)
+            if result == float('inf'):
+                results.append(f"Operation '{name}' failed: division by zero for input {item}.")
+            else:
+                results.append(result)
+
+        return results
+
+    def visualize_results(self, results: List[Union[str, float]]):
+        with open('results_log.txt', 'a') as log_file:
+            successes = [r for r in results if isinstance(r, (int, float))]
+            errors = [r for r in results if isinstance(r, str)]
+
+            log_file.write("Successes:\n" + '\n'.join(str(s) for s in successes) + '\n')
+            log_file.write("Errors:\n" + '\n'.join(str(e) for e in errors) + '\n')
+
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+
+# ここからコード実行
+operation_manager = OperationManager(max_workers=4)  # 最大スレッド数を指定
+create_operations(operation_manager)
+
+data = [1, 2, 0, 'invalid', 4, 5]
+results = operation_manager.run_operations(data, chosen_operations=["Increment", "Cube", "Safe Divide"])
+```
+
+## テスト方法
+1. **エラーメッセージ検証**: `data = [3, 0, 'invalid']`を入力し、`results_log.txt`にエラーメッセージが正確に記録されていることを確認。
+2. **操作登録と削除検証**: 同一名の操作を再登録した後、削除して`ValueError`が発生しないか確認。
+3. **動的操作選択検証**: `chosen_operations = ["Increment", "Safe Divide"]`を使用し、計算結果が正しく記録されるかチェック。
+4. **スレッド管理能力テスト**: 大規模データセット`data = list(range(1000))`を使用してパフォーマンスを評価。
+5. **結果の視覚確認**: `results_log.txt`出力が一貫し、成功・エラーの集計が正しいことを検証。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
