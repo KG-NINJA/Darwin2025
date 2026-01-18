@@ -8590,3 +8590,120 @@ def create_operations(manager: OperationManager):
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-01-18
+
+## 改善テーマ分析
+現在のアルゴリズムは、操作の登録・削除機能、スレッド処理、エラーハンドリングが実装されており、全体的に安定性は向上しています。しかし、以下の問題点があります：
+
+1. **エラーハンドリング**: 現在の実装はエラー時に文字列メッセージを返すだけで、エラーの詳細を提供しないため、デバッグが難しい。
+2. **コードの重複**: 同じようなエラーチェックが複数の箇所で重複している。
+3. **パフォーマンスの最適化**: データ量が増えると、スレッドの管理が最適化されず、処理速度に影響が出る場合があります。
+
+## 提案コード
+以下の改善案を実装したコードを提供します。エラーハンドリングを強化し、コードの可読性を高め、スレッドの動的調整を行いやすくします。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Callable, Union
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+        self.success_count = 0
+        self.error_count = 0
+
+    def apply(self, value: float) -> Union[str, float]:
+        try:
+            result = self.func(value)
+            self.success_count += 1
+            return result
+        except Exception as e:
+            self.error_count += 1
+            return f"Error in {self.name}: {str(e)}"
+
+class OperationManager:
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' is already registered.")
+        self.operations[name] = Operation(func, name)
+
+    def remove_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        errors = []
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        
+        if not valid_data:
+            return ["No valid data to process."]
+
+        max_workers = min(4, max(1, len(valid_data) // 2))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                operation_results = future.result()
+                results.extend([result for result in operation_results if isinstance(result, (int, float))])
+                errors.extend([result for result in operation_results if isinstance(result, str)])
+        
+        self._log_metrics()
+        return results, errors
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        for name in chosen_operations:
+            if name not in self.operations:
+                results.append(f"Error: Operation '{name}' is not registered.")
+            else:
+                result = self.operations[name].apply(item)
+                results.append(result)
+        return results
+
+    def _log_metrics(self):
+        print("\nSummary of operations:")
+        for op in self.operations.values():
+            print(f"{op.name}: Successes: {op.success_count}, Errors: {op.error_count}")
+
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x if x != 0 else float("inf"),
+        "Double": lambda x: x * 2
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+```
+
+## テスト方法
+1. **エラーメッセージ検証**:
+   - `data = [3, 0, 'invalid', -1]`を用いて、エラーメッセージに「Error in <operation name>: ...」の形式が表示されることを確認。
+
+2. **操作登録と削除検証**:
+   - `"Double"`操作を追加して正しく登録されたかを確認し、削除後に再登録ができないことを確認。
+
+3. **動的操作選択検証**:
+   - `chosen_operations`に`["Increment", "Safe Divide"]`を設定し、結果が正確に算出されるか確認。
+
+4. **メトリクス確認**:
+   - 各操作の成功・失敗回数が正確に記録され、`_log_metrics`メソッドが正しく機能することを検証。
+
+5. **スレッド管理テスト**:
+   - 大量のデータ（`data = [1, 2, ..., 1000]`）を使用し、スレッドの動的管理が適切に行われることを観察。
+
+これにより、安定性を高めつつ、直感的なエラーハンドリングを実現します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
