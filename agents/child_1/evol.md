@@ -9689,3 +9689,131 @@ def create_operations(manager: OperationManager):
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-01-27
+
+## 改善テーマ分析
+現在のコードは拡張性があり、動的に操作を登録・削除できる利点があります。しかし、以下の問題点があります：
+- エラーメッセージが一貫性に欠け、異なる操作で出力形式が異なる。
+- スレッドプールを利用しているが、大規模データに対するパフォーマンスが不明。
+- 管理者はどの操作が失敗したかを把握するのが難しいため、ログの可視化に改善余地がある。
+
+ここでの改善案は、エラーメッセージの標準化、パフォーマンスの計測、可視化の強化を通じて、拡張性を保つと共に、ユーザー体験を向上させることです。
+
+## 提案コード
+以下は、エラーメッセージの標準化と基本的なロギングメカニズムを向上させた実装例です。
+
+```python
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, List, Union
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+        self.success_count = 0
+        self.error_count = 0
+
+    def apply(self, value: float) -> Union[str, float]:
+        try:
+            result = self.func(value)
+            self.success_count += 1
+            return result
+        except Exception as e:
+            self.error_count += 1
+            return self._format_error_message(e)
+
+    def _format_error_message(self, error: Exception) -> str:
+        return f"Error in '{self.name}': {str(error)}"
+
+class OperationManager:
+    def __init__(self, max_workers: int = 5):
+        self.operations: Dict[str, Operation] = {}
+        self.max_workers = max_workers
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        self.operations[name] = Operation(func, name)
+
+    def remove_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+
+        if not data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                operation_results = future.result()
+                results["results"].extend([result for result in operation_results if isinstance(result, (int, float))])
+                results["errors"].extend([result for result in operation_results if isinstance(result, str)])
+
+        self._log_metrics()
+        self._save_log_to_file()
+        return results
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> List[Union[str, float]]:
+        results = []
+        for name in chosen_operations:
+            if name not in self.operations:
+                results.append(f"Error: Operation '{name}' is not registered.")
+            else:
+                result = self.operations[name].apply(item)
+                results.append(result)
+        return results
+
+    def _log_metrics(self):
+        print("\nSummary of operations:")
+        for op in self.operations.values():
+            print(f"{op.name}: Successes: {op.success_count}, Errors: {op.error_count}")
+
+    def _save_log_to_file(self, filename="operation_metrics.json"):
+        metrics_data = {op.name: {"successes": op.success_count, "errors": op.error_count} for op in self.operations.values()}
+        with open(filename, "w") as f:
+            json.dump(metrics_data, f)
+
+
+# 使用例
+def create_operations(manager: OperationManager):
+    operations = {
+        "Increment": lambda x: x + 1,
+        "Cube": lambda x: x ** 3,
+        "Square": lambda x: x ** 2,
+        "Safe Divide": lambda x: 10 / x if x != 0 else float("inf"),
+        "Double": lambda x: x * 2,
+        "Subtract Ten": lambda x: x - 10
+    }
+    for name, func in operations.items():
+        manager.register_operation(func, name)
+```
+
+## テスト方法
+1. **動的操作登録**:
+   - `"Subtract Ten"`を追加し、登録、削除、再登録を行い、エラーメッセージが一貫していることを確認。
+
+2. **エラーメッセージの一貫性**:
+   - `data = [3, 0, 'invalid', -1]`を使用し、各エラーメッセージが同じ形式で出力されることを確認。
+
+3. **動的操作選択検証**:
+   - `chosen_operations`に`["Increment", "Safe Divide"]`を設定し、期待される出力（成功した場合の結果とエラー）と一致するか確認。
+
+4. **メトリクス記録**:
+   - 各操作の成功数とエラーカウントが正確に記録され、表示されることを確認。
+
+5. **スレッドのパフォーマンステスト**:
+   - 大規模データ（例: `[1, 2, ..., 1000]`）を使用して、スレッドが適切に管理されることを測定し、性能に影響がないことを確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
