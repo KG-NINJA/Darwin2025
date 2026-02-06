@@ -10914,3 +10914,123 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2023-10-06
+
+## 改善テーマ分析
+現在のコードは動的な操作管理を効率化していますが、以下の問題が見受けられます：
+
+- **エラーハンドリング**: エラーメッセージがユーザーに対するフィードバックの一環として重要ですが、特定のケースに対する柔軟性が不足しています。
+- **スレッドの安定性**: スレッドプールの管理が単純で、処理中のエラー時の再試行やログ記録が不十分です。
+- **拡張性**: 新しい操作の追加について、現在はハードコーディングされています。将来的には操作の種類が増加する可能性があり、そのための柔軟性が必要です。
+
+## 提案コード
+以下のコードは、上記の問題を解決するための改善案を含んでいます。
+
+```python
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, List, Union
+
+class Operation:
+    def __init__(self, func: Callable[[float], float], name: str):
+        self.func = func
+        self.name = name
+        self.success_count = 0
+        self.error_count = 0
+    
+    def apply(self, value):
+        try:
+            result = self.func(value)
+            self.success_count += 1
+            return result
+        except Exception as e:
+            self.error_count += 1
+            return f"[ERROR-{self.name}] {str(e)}"
+
+class OperationManager:
+    def __init__(self, max_workers: int = 5):
+        self.operations: Dict[str, Operation] = {}
+        self.max_workers = max_workers
+
+    def register_operation(self, func: Callable[[float], float], name: str):
+        if name in self.operations:
+            return f"[ERROR] Operation '{name}' is already registered."
+        self.operations[name] = Operation(func, name)
+        return f"[INFO] Operation '{name}' registered."
+
+    def remove_operation(self, name: str):
+        if name not in self.operations:
+            return f"[ERROR] Operation '{name}' not found."
+        del self.operations[name]
+        return f"[INFO] Operation '{name}' removed."
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                item_results = future.result()
+                results["results"].extend(item_results.get('results', []))
+                results["errors"].extend(item_results.get('errors', []))
+
+        results['errors'].extend([item for item in data if not isinstance(item, (int, float))])
+        self._log_metrics()
+        self._save_log_to_file()
+        return results
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for name in chosen_operations:
+            if name not in self.operations:
+                results['errors'].append(f"[ERROR] Operation '{name}' is not registered.")
+                continue
+            result = self.operations[name].apply(item)
+            # 新しいエラーハンドリング
+            if isinstance(result, str) and result.startswith("[ERROR]"):
+                results['errors'].append(result)
+            else:
+                results['results'].append(result)
+        return results
+
+    def _log_metrics(self):
+        metrics_data = {op.name: {"successes": op.success_count, "errors": op.error_count} for op in self.operations.values()}
+        print("\nSummary of operations:", json.dumps(metrics_data, indent=2))
+
+    def _save_log_to_file(self, filename="operation_metrics.json"):
+        metrics_data = {op.name: {"successes": op.success_count, "errors": op.error_count} for op in self.operations.values()}
+        with open(filename, "w") as f:
+            json.dump(metrics_data, f)
+
+    def validate_data(self, data: List[Union[int, float]]) -> bool:
+        return all(isinstance(item, (int, float)) for item in data)
+```
+
+## テスト方法
+1. **エラーハンドリングテスト**:
+   - `data = [10, 'fail me', 20]`を使用して、操作が失敗した場合に適切なエラーメッセージが返されるか確認します。
+
+2. **スレッド安定性テスト**:
+   - 大規模データセット（例: `[1, 2, ..., 1000]`）を送信し、同時にエラー処理が機能するか確認します。
+
+3. **操作の追加と削除テスト**:
+   - 新しい操作を登録し、削除が適切に機能するかテストします。
+
+4. **メトリクス記録テスト**:
+   - 各操作の成功/エラーカウントが正確に記録され、表示されることを確認します。
+
+この改善が今後の開発の安定性向上に寄与することを期待しています。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
