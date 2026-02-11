@@ -11420,3 +11420,120 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-02-11
+
+## 改善テーマ分析
+現在のコードの「拡張性」を高めるための問題点は以下の通りです。
+
+- **モジュール化の不足**: 機能が一つのクラスに詰め込まれているため、それぞれの操作を個別に展開しづらい。
+- **エラーハンドリングの分散**: エラーメッセージをユーザーに表示する方法が散発的で、一貫性を欠いている。
+- **メトリクスの収集方法が固定的**: 操作に関するメトリクス収集が手動で実行されているため、拡張する際に再実装が必要になる。
+
+これらの問題を考慮し、クラスを機能ごとに分割し、エラーハンドリングを中心に据えた拡張可能な構造を提案します。
+
+## 提案コード
+以下のコードは、「拡張性」を念頭に置いてモジュール化し、エラーハンドリングを改善したものです。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Union, Tuple
+import json
+
+class Operation:
+    """オペレーションを定義するクラス"""
+    def __init__(self, name: str):
+        self.name = name
+        self.success_count = 0
+        self.error_count = 0
+
+    def execute(self, item: Union[int, float]) -> Union[int, float]:
+        # 基本的な処理を実行する関数; 継承先でオーバーライド可能
+        return item
+
+class EnhancedOperationManager:
+    def __init__(self, max_workers: int):
+        self.max_workers = max_workers
+        self.operations = {}
+
+    def register_operation(self, operation: Operation):
+        self.operations[operation.name] = operation
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        
+        valid_data, invalid_data = self.validate_data(data)
+        if invalid_data:
+            results["errors"].extend(invalid_data)
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+
+            for future in as_completed(future_to_data):
+                try:
+                    item_results = future.result()
+                    results['results'].extend(item_results.get('results', []))
+                    results['errors'].extend(item_results.get('errors', []))
+                except Exception as e:
+                    results['errors'].append(f"[ERROR] {str(e)} encountered during processing.")
+
+        self._aggregate_metrics()
+        self._log_metrics(results)
+
+        return results
+
+    def validate_data(self, data: List[Union[int, float]]) -> Tuple[List[Union[int, float]], List[str]]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [f"{item} is not a valid number." for item in data if not isinstance(item, (int, float))]
+        return valid_data, invalid_data
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for op_name in chosen_operations:
+            operation = self.operations.get(op_name)
+            if not operation:
+                results['errors'].append(f"[ERROR] Operation '{op_name}' is not registered.")
+                continue
+
+            try:
+                result = operation.execute(item)
+                results['results'].append(result)
+                operation.success_count += 1
+            except Exception as e:
+                results['errors'].append(f"[ERROR] {str(e)} encountered in operation '{op_name}'.")
+                operation.error_count += 1
+        return results
+
+    def _aggregate_metrics(self):
+        metrics_data = {name: {"successes": op.success_count, "errors": op.error_count} for name, op in self.operations.items()}
+        print("\nAggregated summary of operations:", json.dumps(metrics_data, indent=2))
+
+    def _log_metrics(self, results: dict):
+        pass  # Implement log output logic as needed
+
+```
+
+## テスト方法
+1. **操作の登録テスト**:
+   - `Operation`のインスタンスを生成し、`register_operation`で登録できるか確認します。
+   - 存在しない操作名を使った場合にエラーメッセージが返されることを確認します。
+
+2. **エラーハンドリングテスト**:
+   - テストデータ `data = [10, 'invalid', 20]` を使用し、エラーが適切に処理され、ユーザーに表示されることを確認します。
+   - `assert`を使い、操作が実行されない場合のエラーメッセージが正しい形式で返されることを確認します。
+
+3. **メトリクス収集テスト**:
+   - 複数の操作を登録・実行し、`_aggregate_metrics`メソッドが正しくメトリクスを集計するか確認します。
+   - 同時にエラーが発生するケースも考慮し、成功とエラーのカウントが適切に記録されているかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
