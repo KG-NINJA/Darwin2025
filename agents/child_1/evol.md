@@ -11771,3 +11771,117 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-02-14
+
+## 改善テーマ分析
+現在の実装では、操作の実行やデータの検証における効率性に課題があります。具体的には、スレッドプールを利用しているにも関わらず、データ処理のエラーや成功数の集計ロジックが複雑で可読性が低く、エラー処理も重複する可能性があります。
+
+### 現在の問題点
+1. **エラー処理の重複**: 各操作ごとにエラーが発生した場合、エラーメッセージの整形が重複しており無駄が多い。
+2. **メトリクスの集計方法**: メトリクスの集計ロジックが冗長で、スレッド競合の可能性がある。
+3. **操作の実行**: 各操作の成功数やエラー数の集計が、操作実行時に直接影響を与えているため、見通しの良いロジックにする必要がある。
+
+## 提案コード
+以下のコードは、効率を向上させるための改良案です。主な改善点は、エラー処理を一元化し、メトリクスの集約を簡素化したことです。
+
+```python
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Union, Tuple
+
+class Operation:
+    def __init__(self, name: str):
+        self.name = name
+        self.success_count = 0
+        self.error_count = 0
+
+    def execute(self, item: Union[int, float]) -> Union[int, float]:
+        return item
+
+class EnhancedOperationManager:
+    def __init__(self, max_workers: int):
+        self.max_workers = max_workers
+        self.operations = {}
+        self.metrics_lock = threading.Lock()  
+
+    def register_operation(self, operation: Operation):
+        if operation.name in self.operations:
+            raise ValueError(f"Operation '{operation.name}' is already registered.")
+        self.operations[operation.name] = operation
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        
+        valid_data, invalid_data = self.validate_data(data)
+        results["errors"].extend(invalid_data)
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+
+            for future in as_completed(future_to_data):
+                item_results = future.result()
+                results['results'].extend(item_results['results'])
+                results['errors'].extend(item_results['errors'])
+
+        self._aggregate_metrics()
+        self._log_metrics(results)
+
+        return results
+
+    def validate_data(self, data: List[Union[int, float]]) -> Tuple[List[Union[int, float]], List[str]]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [f"{item} is not a valid number." for item in data if not isinstance(item, (int, float))]
+        return valid_data, invalid_data
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for op_name in chosen_operations:
+            operation = self.operations.get(op_name)
+            if not operation:
+                results['errors'].append(f"[ERROR] Operation '{op_name}' is not registered.")
+                continue
+
+            try:
+                result = operation.execute(item)
+                results['results'].append(result)
+                operation.success_count += 1
+            except Exception as e:
+                results['errors'].append(f"[ERROR] {str(e)} in '{op_name}'.")
+                operation.error_count += 1
+        return results
+
+    def _aggregate_metrics(self):
+        with self.metrics_lock:
+            metrics_data = {name: {"successes": op.success_count, "errors": op.error_count} for name, op in self.operations.items()}
+            print("\nAggregated summary of operations:", json.dumps(metrics_data, indent=2))
+
+    def _log_metrics(self, results: dict):
+        with open('metrics_log.json', 'a') as log_file:
+            log_file.write(json.dumps(results) + "\n")
+```
+
+## テスト方法
+1. **操作の登録テスト**:
+   - 正常に`Operation`を登録し、その名前が既に存在する場合に`ValueError`が発生することを確認。
+
+2. **エラーハンドリングテスト**:
+   - テストデータ `data = [10, 'invalid', 20]` を使用し、エラーが適切に処理されることを確認。
+   - エラーメッセージが一貫性を持って表示されるか確認する。
+
+3. **メトリクス収集テスト**:
+   - 複数の操作を登録・実行し、メトリクスが正確に収集されることを確認。
+   - メトリクスがファイルに正しく記録されることを、JSON形式の整合性をチェックしながら確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
