@@ -11885,3 +11885,118 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-02-15
+
+## 改善テーマ分析
+現在のアルゴリズムはスレッドによる並列処理を利用しているが、拡張性に関しては幾つかの問題点があります。具体的には、次の点が挙げられます：
+- 現在のデータの検証と処理が密結合であり、特定の操作を追加・変更する際にコードを再修正する必要がある。
+- 新しいタイプの操作を追加する場合、既存コードに多くの影響を与える可能性がある。
+- エラーメッセージとロギングが厳格に固定されており、柔軟性に欠ける。
+
+これらの課題に対処するために、以下の改善案を提案します。
+
+## 提案コード
+以下に新しいフレームワークを実装します。これにより、操作の追加・削除が容易になり、各種エラー処理が一元管理されるようになります。
+
+```python
+from typing import Callable
+
+class Operation:
+    def __init__(self, name: str, func: Callable[[Union[int, float]], Union[int, float]]):
+        self.name = name
+        self.func = func
+        self.success_count = 0
+        self.error_count = 0
+
+    def execute(self, item: Union[int, float]) -> Union[int, float]:
+        return self.func(item)
+
+class EnhancedOperationManager:
+    def __init__(self, max_workers: int):
+        self.max_workers = max_workers
+        self.operations = {}
+        self.metrics_lock = threading.Lock()
+
+    def register_operation(self, name: str, func: Callable[[Union[int, float]], Union[int, float]]):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' already exists.")
+        self.operations[name] = Operation(name, func)
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        
+        valid_data, invalid_data = self.validate_data(data)
+        results["errors"].extend(invalid_data)
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+
+            for future in as_completed(future_to_data):
+                item_results = future.result()
+                results['results'].extend(item_results['results'])
+                results['errors'].extend(item_results['errors'])
+
+        self._aggregate_metrics()
+        self._log_metrics(results)
+
+        return results
+
+    def validate_data(self, data: List[Union[int, float]]) -> Tuple[List[Union[int, float]], List[str]]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [f"{item} is not a valid number." for item in data if not isinstance(item, (int, float))]
+        return valid_data, invalid_data
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for op_name in chosen_operations:
+            operation = self.operations.get(op_name)
+            if not operation:
+                results['errors'].append(f"[ERROR] Operation '{op_name}' is not registered.")
+                continue
+
+            try:
+                result = operation.execute(item)
+                results['results'].append(result)
+                operation.success_count += 1
+            except Exception as e:
+                results['errors'].append(f"[ERROR] {str(e)} in '{op_name}'.")
+                operation.error_count += 1
+        return results
+
+    def _aggregate_metrics(self):
+        with self.metrics_lock:
+            metrics_data = {name: {"successes": op.success_count, "errors": op.error_count} for name, op in self.operations.items()}
+            print("\nAggregated summary of operations:", json.dumps(metrics_data, indent=2))
+
+    def _log_metrics(self, results: dict):
+        with open('metrics_log.json', 'a') as log_file:
+            log_file.write(json.dumps(results) + "\n")
+```
+
+## テスト方法
+1. **操作の登録テスト**:
+   - 新しい操作を関数形式で追加し、動作を確認する。
+   - 同名の操作を再登録しようとした際に`ValueError`が発生することをテスト。
+
+2. **データ検証テスト**:
+   - 様々な型のデータを使用し、検証が正しく行われることを確認。
+   - 無効なデータに対するエラーメッセージが正確であるか確認する。
+
+3. **メトリクス収集テスト**:
+   - 異なる操作を適用し、その結果が正しく記録されることを確認。
+   - メトリクスログが期待通りのJSON形式で保存されているか検証する。
+
+これにより、拡張性が向上し、新たな機能を追加しやすくなります。
+
+## テスト結果
+- ステータス: FAIL
+- スコア: 0
+- 詳細: name 'Union' is not defined
+- ベストスコア: 0.8
+
+---

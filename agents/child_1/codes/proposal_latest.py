@@ -1,27 +1,25 @@
-import json
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Union, Tuple
+from typing import Callable
 
 class Operation:
-    def __init__(self, name: str):
+    def __init__(self, name: str, func: Callable[[Union[int, float]], Union[int, float]]):
         self.name = name
+        self.func = func
         self.success_count = 0
         self.error_count = 0
 
     def execute(self, item: Union[int, float]) -> Union[int, float]:
-        return item
+        return self.func(item)
 
 class EnhancedOperationManager:
     def __init__(self, max_workers: int):
         self.max_workers = max_workers
         self.operations = {}
-        self.metrics_lock = threading.Lock()  
+        self.metrics_lock = threading.Lock()
 
-    def register_operation(self, operation: Operation):
-        if operation.name in self.operations:
-            raise ValueError(f"Operation '{operation.name}' is already registered.")
-        self.operations[operation.name] = operation
+    def register_operation(self, name: str, func: Callable[[Union[int, float]], Union[int, float]]):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' already exists.")
+        self.operations[name] = Operation(name, func)
 
     def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
         results = {"results": [], "errors": []}
