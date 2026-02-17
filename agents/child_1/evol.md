@@ -12120,3 +12120,128 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2023-10-06
+## 改善テーマ分析
+現在の「安定性」に基づき、以下の問題点が特定されました：
+- **エラーハンドリング**: 現在の実装では、エラーが発生した場合の情報が不十分です。特に、どの操作でエラーが発生したかが明示されている必要があります。
+- **データ検証**: `validate_data`メソッドでのエラーメッセージはユーザーにとってあまり具体的ではないため、どの入力が問題かを特定するのが難しい。
+- **メトリクスの可視化**: 現在はコンソールに出力していますが、ログファイルに残すことを進め、可視性と分析がしやすくします。
+
+## 提案コード
+以下の改善案を考慮した新しい実装です：
+
+```python
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Union, List, Callable, Tuple
+
+class Operation:
+    def __init__(self, name: str, func: Callable[[Union[int, float]], Union[int, float]], description: str = ""):
+        self.name = name
+        self.func = func
+        self.description = description  # メタデータ属性
+        self.success_count = 0
+        self.error_count = 0
+
+    def execute(self, item: Union[int, float]) -> Union[int, float]:
+        return self.func(item)
+
+class EnhancedOperationManager:
+    def __init__(self, max_workers: int):
+        self.max_workers = max_workers
+        self.operations = {}
+        self.metrics_lock = threading.Lock()
+
+    def register_operation(self, name: str, func: Callable[[Union[int, float]], Union[int, float]], description: str = ""):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' already exists.")
+        self.operations[name] = Operation(name, func, description)
+
+    def unregister_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+        else:
+            raise ValueError(f"Operation '{name}' does not exist.")
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        valid_data, invalid_data = self.validate_data(data)
+        results["errors"].extend(invalid_data)
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+
+            for future in as_completed(future_to_data):
+                item_results = future.result()
+                results['results'].extend(item_results['results'])
+                results['errors'].extend(item_results['errors'])
+
+        self._aggregate_metrics()
+        self._log_metrics(results)
+
+        return results
+
+    def validate_data(self, data: List[Union[int, float]]) -> Tuple[List[Union[int, float]], List[str]]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [
+            f"{item} is not a valid number." for item in data if not isinstance(item, (int, float))
+        ]
+        return valid_data, invalid_data
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for op_name in chosen_operations:
+            operation = self.operations.get(op_name)
+            if not operation:
+                results['errors'].append(f"[ERROR] Operation '{op_name}' is not registered.")
+                continue
+
+            try:
+                result = operation.execute(item)
+                results['results'].append(result)
+                operation.success_count += 1
+            except Exception as e:
+                error_message = f"[ERROR] {str(e)} in '{op_name}' for input '{item}'."
+                results['errors'].append(error_message)
+                operation.error_count += 1
+        return results
+
+    def _aggregate_metrics(self):
+        with self.metrics_lock:
+            metrics_data = {
+                name: {"successes": op.success_count, "errors": op.error_count} 
+                for name, op in self.operations.items()
+            }
+            print("\nAggregated summary of operations:", json.dumps(metrics_data, indent=2))
+
+    def _log_metrics(self, results: dict):
+        with open('metrics_log.json', 'a') as log_file:
+            log_file.write(json.dumps(results) + "\n")
+```
+
+## テスト方法
+1. **操作の登録テスト**:
+   - 新しい操作を登録し、動作確認を行います。同名の操作を登録しようとした際に`ValueError`が発生することを確認します。
+
+2. **操作の削除テスト**:
+   - 既存の操作を削除し、削除後にアクセスしようとした際に`ValueError`が発生するか確認します。また、削除できなかった場合のエラーメッセージも検証します。
+
+3. **データ検証テスト**:
+   - 様々な型のデータを用いて検証が正確であることを確認します。不正なデータに対して具体的なエラーメッセージが表示されることを確認します。
+
+4. **メトリクス収集テスト**:
+   - 異なる操作を適用し、その結果が正しく記録されることを確認します。また、メトリクスログが期待通りのJSON形式で保存されるかを検証します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
