@@ -12245,3 +12245,134 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-02-18
+
+## 改善テーマ分析
+「直感」をテーマにした場合、現在のコードは次のような問題点があります：
+- 操作の登録や削除時に、エラーメッセージが一般的で具体性に欠ける。
+- エラーハンドリングが単一の例外に依存しているため、詳細な原因が分かりにくい。
+- メトリクスロギングがファイル操作に依存しており、全体のフローが非同期処理と統合しにくい。
+
+このため、コードの直感的な可読性や使いやすさを上げる提案を行います。
+
+## 提案コード
+以下は、問題点を解決した改善案です：
+
+```python
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Callable, Union, Tuple
+
+class Operation:
+    def __init__(self, name: str, func: Callable[[Union[int, float]], Union[int, float]], description: str = ""):
+        self.name = name
+        self.func = func
+        self.description = description
+        self.success_count = 0
+        self.error_count = 0
+
+    def execute(self, item: Union[int, float]) -> Union[int, float]:
+        return self.func(item)
+
+class EnhancedOperationManager:
+    def __init__(self, max_workers: int):
+        self.max_workers = max_workers
+        self.operations = {}
+        self.metrics_lock = threading.Lock()
+
+    def register_operation(self, name: str, func: Callable[[Union[int, float]], Union[int, float]], description: str = ""):
+        if name in self.operations:
+            raise ValueError(f"Operation '{name}' already exists: {self.operations[name].description}")
+        self.operations[name] = Operation(name, func, description)
+
+    def unregister_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+        else:
+            raise ValueError(f"Operation '{name}' does not exist.")
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        valid_data, invalid_data = self.validate_data(data)
+        results["errors"].extend(invalid_data)
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+
+            for future in as_completed(future_to_data):
+                item_results = future.result()
+                results['results'].extend(item_results['results'])
+                results['errors'].extend(item_results['errors'])
+
+        self._aggregate_metrics()
+        self._log_metrics(results)
+
+        return results
+
+    def validate_data(self, data: List[Union[int, float]]) -> Tuple[List[Union[int, float]], List[str]]:
+        valid_data = [item for item in data if isinstance(item, (int, float))]
+        invalid_data = [
+            f"{item} is not a valid number." for item in data if not isinstance(item, (int, float))
+        ]
+        return valid_data, invalid_data
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for op_name in chosen_operations:
+            operation = self.operations.get(op_name)
+            if not operation:
+                results['errors'].append(f"[ERROR] Operation '{op_name}' is not registered.")
+                continue
+
+            try:
+                result = operation.execute(item)
+                results['results'].append(result)
+                operation.success_count += 1
+            except Exception as e:
+                error_message = f"[ERROR] {str(e)} in '{op_name}' for input '{item}'."
+                results['errors'].append(error_message)
+                operation.error_count += 1
+        return results
+
+    def _aggregate_metrics(self):
+        with self.metrics_lock:
+            metrics_data = {
+                name: {"successes": op.success_count, "errors": op.error_count} 
+                for name, op in self.operations.items()
+            }
+            print("\nAggregated summary of operations:", json.dumps(metrics_data, indent=2))
+
+    def _log_metrics(self, results: dict):
+        with self.metrics_lock:
+            with open('metrics_log.json', 'a') as log_file:
+                log_file.write(json.dumps(results) + "\n")
+```
+
+## テスト方法
+1. **操作の登録テスト**:
+   - 新しい操作を登録し、動作が期待通りであることを確認します。同名の操作を登録しようとした際に、具体的なエラーメッセージが`ValueError`として発生することを確認します。
+
+2. **操作の削除テスト**:
+   - 既存の操作を削除し、削除後にアクセスしようとした際に具体的なエラーメッセージの`ValueError`が発生することを確認します。
+
+3. **データ検証テスト**:
+   - 異なるデータタイプを用いて、正確な検証を行います。不正なデータに対しては具体的なエラーメッセージが表示されることを確認します。
+
+4. **メトリクス収集テスト**:
+   - 異なる操作を適用し、その結果が正しく含まれ、メトリクスログが期待通りのJSON形式で出力されることを確認します。
+
+この改善によって、操作の登録・削除時のエラーメッセージがより直感的になり、エラー処理がしやすくなります。次のステップはテストの実施です。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
