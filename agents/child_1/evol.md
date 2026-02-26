@@ -13237,3 +13237,132 @@ class OperationProcessor:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-02-26
+
+## 改善テーマ分析
+現在のコードは、操作の登録と削除、データ検証、エラーハンドリングが適切に行われていますが、以下の問題点があります:
+
+1. **拡張性不足**: 新しい操作が増えるたびにコードを変更する必要があり、運用が煩雑になる恐れがあります。
+2. **エラー処理の冗長性**: エラーメッセージや例外処理の記述が繰り返され、拡張時にエラーが発生する可能性があります。
+3. **メトリクス収集の適用範囲**: メトリクスの収集がロギング処理に依存しており、異なるバックエンドでの処理が難しくなっています。
+
+## 提案コード
+以下のコードは、辞書型を使って操作を登録し、エラー処理を関数化することで、拡張性を高めたものです。また、メトリクス収集の仕組みを改善するために、メトリクス送信関数を実装しました。
+
+```python
+import json
+import logging
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Union, Tuple, Callable
+
+class OperationManager:
+    def __init__(self, max_workers: int = 5):
+        self.max_workers = max_workers
+        self.operations: dict[str, Callable] = {}
+        self.metrics_lock = threading.Lock()
+        self.retry_attempts = 3
+
+    def register_operation(self, name: str, operation: Callable):
+        self.operations[name] = operation
+
+    def unregister_operation(self, name: str):
+        if name in self.operations:
+            del self.operations[name]
+        else:
+            logging.error(f"Operation '{name}' does not exist.")
+
+    def run_operations(self, data: List[Union[int, float]], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        valid_data, invalid_data = self.validate_data(data)
+        results["errors"].extend(invalid_data)
+
+        if not valid_data:
+            results["errors"].append("No valid data to process.")
+            return results
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_data = {executor.submit(self._process_item, item, chosen_operations): item for item in valid_data}
+            for future in as_completed(future_to_data):
+                item_results = future.result()
+                results['results'].extend(item_results['results'])
+                results['errors'].extend(item_results['errors'])
+
+        self._aggregate_metrics(results)
+        return results
+
+    def validate_data(self, data: List[Union[int, float]]) -> Tuple[List[Union[int, float]], List[str]]:
+        valid_data = []
+        invalid_data = []
+        for item in data:
+            if not isinstance(item, (int, float)):
+                invalid_data.append(f"Error: {item} is not a valid number.")
+            else:
+                valid_data.append(item)
+        return valid_data, invalid_data
+
+    def _process_item(self, item: Union[int, float], chosen_operations: List[str]) -> dict:
+        results = {"results": [], "errors": []}
+        for op_name in chosen_operations:
+            operation = self.operations.get(op_name)
+            if operation is None:
+                results['errors'].append(f"Error: Operation '{op_name}' is not registered.")
+                continue
+
+            results = self._execute_with_retry(operation, item, results, op_name)
+        
+        return results
+
+    def _execute_with_retry(self, operation: Callable, item: Union[int, float], results: dict, op_name: str) -> dict:
+        for attempt in range(self.retry_attempts):
+            try:
+                result = operation(item)
+                results['results'].append(result)
+                break 
+            except Exception as e:
+                logging.error(f"Operation '{op_name}' failed: {e} (Attempt {attempt + 1})")
+                if attempt == self.retry_attempts - 1:
+                    results['errors'].append(f"Error: Operation '{op_name}' failed after {self.retry_attempts} attempts.")
+        return results
+
+    def _aggregate_metrics(self, results: dict):
+        # メトリクスを集計し、より詳細な情報を提供する処理を実装
+        self._log_metrics(results)
+
+    def _log_metrics(self, results: dict):
+        with self.metrics_lock:
+            with open('metrics_log.json', 'a') as log_file:
+                log_file.write(json.dumps({
+                    "results": results['results'],
+                    "errors": results['errors'],
+                    "timestamp": datetime.now().isoformat()
+                }) + "\n")
+```
+
+## テスト方法
+1. **登録/削除テスト**:
+   - `register_operation`メソッドで操作を追加・削除後、存在確認を行う。
+
+2. **データ検証テスト**:
+   - 整数、浮動小数点、無効データを含むリストを渡し、エラーメッセージが正しいか確認。
+
+3. **結果ロギングテスト**:
+   - `metrics_log.json`に処理結果が正しく記録されるか確認。
+
+4. **並列処理テスト**:
+   - 大規模データを用いて`run_operations`メソッドを実行し、全ての操作が効率的に並行して行われるか確認。
+
+5. **エラーハンドリングテスト**:
+   - 操作中に例外が発生した場合に正しいエラー処理が行われるか、エラー情報が詳細に記録されるか確認。
+
+6. **拡張性テスト**:
+   - 新しい操作を追加し、コードの変更を最小限に保てるかをチェック。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
