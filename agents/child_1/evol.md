@@ -13900,3 +13900,94 @@ manager.register_operation("Uppercase", ConcreteOperationB())
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-05
+## 改善テーマ分析
+**現在の問題点:**
+- `run_operations`メソッドの中でのエラーハンドリングが曖昧で、個別の操作が失敗した際に全体の結果が影響を受けやすい。
+- 結果とエラーが混在しているため、デバッグが難しく適切なフィードバックを得るのが困難。
+- 操作の実行結果が一つのリストで管理されているため、可読性が低くなっている。
+
+**改善点:**
+- 各操作の結果とエラーを明確に分け、操作ごとに結果をオブジェクトとして詳細に管理することで直感的に理解可能な出力を実現する。
+- 各操作の進行状況をステータスとして記録し、成功と失敗の情報を明示的に提示することで、デバッグと運用の効率を向上させる。
+
+## 提案コード
+```python
+from typing import Protocol, TypeVar, List, Any, Dict
+
+T = TypeVar('T')
+
+class Operation(Protocol[T]):
+    """操作を定義するインターフェース"""
+    def execute(self, item: T) -> dict:
+        ...
+
+class ConcreteOperationA:
+    """整数を2倍にする操作"""
+    def execute(self, item: int) -> Dict[str, Any]:
+        return {"result": item * 2, "error": None}
+
+class ConcreteOperationB:
+    """文字列を大文字にする操作"""
+    def execute(self, item: str) -> Dict[str, Any]:
+        return {"result": item.upper(), "error": None}
+
+class OperationManager:
+    """操作を管理するクラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Operation) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> dict:
+        """選択した操作を実行し、それぞれの結果を管理する"""
+        overall_results = {"operations": {}}
+        
+        for item in data:
+            operation_results = {}
+            for op_name in chosen_operations:
+                operation = self.operations.get(op_name)
+                if operation:
+                    try:
+                        result = operation.execute(item)
+                        operation_results[op_name] = {
+                            "result": result["result"],
+                            "error": result["error"]
+                        }
+                    except Exception as e:
+                        operation_results[op_name] = {
+                            "result": None,
+                            "error": f"エラー: {e} (操作名: {op_name})"
+                        }
+                else:
+                    operation_results[op_name] = {
+                        "result": None,
+                        "error": f"未登録の操作: {op_name}"
+                    }
+            overall_results["operations"][item] = operation_results
+        
+        return overall_results
+
+# 使用例
+manager = OperationManager()
+manager.register_operation("Double", ConcreteOperationA())
+manager.register_operation("Uppercase", ConcreteOperationB())
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを確認し、操作が正しく登録されることを検証。
+2. **データ型テスト**: 整数と文字列を含むリストを与え、各操作が期待通りに動作していることを確認。
+3. **エラーメッセージテスト**: 存在しない操作を指定した場合、および異常データを用いた場合のエラーメッセージが正確であることを検証。
+4. **操作実行結果の分離テスト**: 各操作について、正常な結果とエラーが明確に分かれて管理されているかを確認。
+5. **集約結果テスト**: 複数の操作を混ぜて実行し、結果とエラーが意図した通りに整理されているかチェック。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
