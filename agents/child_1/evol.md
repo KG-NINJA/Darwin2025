@@ -14083,3 +14083,97 @@ manager.register_operation("Uppercase", ConcreteOperationB())
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-07
+## 改善テーマ分析
+**現在の問題点:**
+- `run_operations`メソッドのロジックが、実行結果を明示的にリストに追加するため冗長。
+- 各操作の結果を格納する処理が重複しており、可読性が低下している。
+- エラー処理が細分化されていて、管理が難しい。
+
+**改善点:**
+- `run_operations`の結果をまとめて処理することで、コードの重複を排除。
+- 結果を収集するための専用のクラスを設計し、エラー処理もこのクラスで一元化する。
+- 新しい操作を簡単に追加できるよう、`OperationManager`を拡張できる設計にする。
+
+## 提案コード
+```python
+from typing import Protocol, TypeVar, Any, List, Dict
+
+T = TypeVar('T')
+
+class Operation(Protocol[T]):
+    """操作を定義するインターフェース"""
+    def execute(self, item: T) -> Any:
+        ...
+
+class Result:
+    """結果管理用クラス"""
+    def __init__(self):
+        self.success: List[Dict[str, Any]] = []
+        self.errors: List[Dict[str, Any]] = []
+
+    def add_success(self, operation: str, input_item: Any, result: Any):
+        self.success.append({
+            "operation": operation,
+            "input": input_item,
+            "result": result
+        })
+
+    def add_error(self, operation: str, input_item: Any, error_msg: str):
+        self.errors.append({
+            "operation": operation,
+            "input": input_item,
+            "error": error_msg
+        })
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"success": self.success, "errors": self.errors}
+
+class OperationManager:
+    """操作を管理するクラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Operation) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        """選択した操作を実行し、それぞれの結果を管理する"""
+        results = Result()
+        
+        for item in data:
+            for op_name in chosen_operations:
+                operation = self.operations.get(op_name)
+                if operation:
+                    try:
+                        result = operation.execute(item)
+                        results.add_success(op_name, item, result)
+                    except Exception as e:
+                        results.add_error(op_name, item, f"エラー: {e} (操作名: {op_name})")
+                else:
+                    results.add_error(op_name, item, f"未登録の操作: {op_name}")
+        
+        return results.to_dict()
+
+# 使用例
+manager = OperationManager()
+manager.register_operation("Double", ConcreteOperationA())
+manager.register_operation("Uppercase", ConcreteOperationB())
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを使い、操作が正しく登録されることを確認。
+2. **データ型テスト**: 整数や文字列を含むリストに対して、各操作が正常に動作することを確認。
+3. **エラーメッセージテスト**: 存在しない操作や異常データを入力した場合、適切なエラーメッセージが返されるかを検証。
+4. **結果管理テスト**: 成功した操作と失敗した操作がそれぞれ別のリストに格納され、結果とエラーが正しく整理されているかを確認。
+5. **結果クラスの整合性テスト**: `Result`クラスが正しく動作し、成功とエラーのリストが適切に追加されるかを検証。
+
+## テスト結果
+- ステータス: FAIL
+- スコア: 0
+- 詳細: name 'ConcreteOperationA' is not defined
+- ベストスコア: 0.8
+
+---

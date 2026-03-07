@@ -1,4 +1,4 @@
-from typing import Protocol, TypeVar, List, Any
+from typing import Protocol, TypeVar, Any, List, Dict
 
 T = TypeVar('T')
 
@@ -7,15 +7,28 @@ class Operation(Protocol[T]):
     def execute(self, item: T) -> Any:
         ...
 
-class ConcreteOperationA:
-    """整数を2倍にする操作"""
-    def execute(self, item: int) -> int:
-        return item * 2
+class Result:
+    """結果管理用クラス"""
+    def __init__(self):
+        self.success: List[Dict[str, Any]] = []
+        self.errors: List[Dict[str, Any]] = []
 
-class ConcreteOperationB:
-    """文字列を大文字にする操作"""
-    def execute(self, item: str) -> str:
-        return item.upper()
+    def add_success(self, operation: str, input_item: Any, result: Any):
+        self.success.append({
+            "operation": operation,
+            "input": input_item,
+            "result": result
+        })
+
+    def add_error(self, operation: str, input_item: Any, error_msg: str):
+        self.errors.append({
+            "operation": operation,
+            "input": input_item,
+            "error": error_msg
+        })
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"success": self.success, "errors": self.errors}
 
 class OperationManager:
     """操作を管理するクラス"""
@@ -26,9 +39,9 @@ class OperationManager:
         """操作を登録する"""
         self.operations[name] = operation
 
-    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> dict:
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
         """選択した操作を実行し、それぞれの結果を管理する"""
-        overall_results = {"success": [], "errors": []}
+        results = Result()
         
         for item in data:
             for op_name in chosen_operations:
@@ -36,25 +49,13 @@ class OperationManager:
                 if operation:
                     try:
                         result = operation.execute(item)
-                        overall_results["success"].append({
-                            "operation": op_name,
-                            "input": item,
-                            "result": result
-                        })
+                        results.add_success(op_name, item, result)
                     except Exception as e:
-                        overall_results["errors"].append({
-                            "operation": op_name,
-                            "input": item,
-                            "error": f"エラー: {e} (操作名: {op_name})"
-                        })
+                        results.add_error(op_name, item, f"エラー: {e} (操作名: {op_name})")
                 else:
-                    overall_results["errors"].append({
-                        "operation": op_name,
-                        "input": item,
-                        "error": f"未登録の操作: {op_name}"
-                    })
+                    results.add_error(op_name, item, f"未登録の操作: {op_name}")
         
-        return overall_results
+        return results.to_dict()
 
 # 使用例
 manager = OperationManager()
