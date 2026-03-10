@@ -14381,3 +14381,113 @@ manager.register_operation("Uppercase", ConcreteOperationB())
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-10
+
+## 改善テーマ分析
+現在の実装は、選択した操作を逐次的に実行することで結果を処理していますが、大量のデータを処理する際にパフォーマンス低下が見られます。また、エラー処理が繰り返し発生する場合、結果の確認やデバッグが煩雑になりがちです。このため、以下の改善が求められます：
+- 操作の並列処理を導入し、処理速度を最適化する。
+- エラー処理を一元化し、メッセージを簡潔に保つことでデバッグ作業を容易にする。
+
+## 提案コード
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Protocol, TypeVar, Any, List, Dict
+
+T = TypeVar('T')
+
+class Operation(Protocol[T]):
+    """操作を定義するインターフェース"""
+    def execute(self, item: T) -> Any:
+        pass
+
+class ConcreteOperationA(Operation[int]):
+    """数値を2倍にする操作"""
+    def execute(self, item: int) -> int:
+        return item * 2
+
+class ConcreteOperationB(Operation[str]):
+    """文字列を大文字にする操作"""
+    def execute(self, item: str) -> str:
+        return item.upper()
+
+class Result:
+    """結果管理用クラス"""
+    def __init__(self):
+        self.success: List[Dict[str, Any]] = []
+        self.errors: List[Dict[str, Any]] = []
+
+    def add_success(self, operation: str, input_item: Any, result: Any):
+        self.success.append({
+            "operation": operation,
+            "input": input_item,
+            "result": result
+        })
+
+    def add_error(self, operation: str, input_item: Any, error_msg: str):
+        self.errors.append({
+            "operation": operation,
+            "input": input_item,
+            "error": error_msg
+        })
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"success": self.success, "errors": self.errors}
+
+class OperationManager:
+    """操作を管理するクラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Operation) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        """選択した操作を並列に実行し、それぞれの結果を管理する"""
+        results = Result()
+
+        def run_operation(item: Any, op_name: str):
+            """各操作を実行し、結果を返す"""
+            operation = self.operations.get(op_name)
+            if operation:
+                try:
+                    result = operation.execute(item)
+                    results.add_success(op_name, item, result)
+                except Exception as e:
+                    results.add_error(op_name, item, f"エラー: {str(e)} (操作: {op_name})")
+            else:
+                results.add_error(op_name, item, f"未登録の操作: {op_name}")
+
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            for item in data:
+                for op_name in chosen_operations:
+                    futures.append(executor.submit(run_operation, item, op_name))
+            
+            # 結果の取得
+            for future in as_completed(futures):
+                future.result()
+
+        return results.to_dict()
+
+# 使用例
+manager = OperationManager()
+manager.register_operation("Double", ConcreteOperationA())
+manager.register_operation("Uppercase", ConcreteOperationB())
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを使用し、`ConcreteOperationA` と `ConcreteOperationB` が正しく登録されるか確認します。
+2. **並列処理テスト**: 大量のデータに対して `run_operations` メソッドが並列に実行され、処理時間が短縮されるか検証します。
+3. **エラーメッセージテスト**: 存在しない操作を入力した場合、適切なエラーメッセージが返されるかを確認します。
+4. **結果管理テスト**: 成功した操作と失敗した操作がそれぞれのリストに格納されることを確認し、整理された結果を正確に取得できるかを確かめます。
+5. **結果クラスの整合性テスト**: `Result` クラスの機能を検証し、成功とエラーのリストが適切に追加されるかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
