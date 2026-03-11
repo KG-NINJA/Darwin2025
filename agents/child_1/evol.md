@@ -14491,3 +14491,120 @@ manager.register_operation("Uppercase", ConcreteOperationB())
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-11
+
+## 改善テーマ分析
+現在のコードは操作を登録し、並列に実行する能力を持っていますが、いくつかの効率改善点が見受けられます。具体的には、操作の実行において以下の点が問題です：
+
+- `.execute()`メソッドの呼び出し時に例外処理を個別に行っており、エラーハンドリングのオーバーヘッドが発生。
+- 複数の操作を同時に実行する際のデータ取得処理で、効率を向上させる余地がある。
+- 結果を保持するクラス (`Result`) が一つのスレッドでのみアクセスされる状況のため、排他制御が必要。
+
+これらのポイントを改善することで、全体の処理パフォーマンスを向上させることが期待できます。
+
+## 提案コード
+以下の改善案に基づいた新たな実装を提案します：
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Protocol, TypeVar, Any, List, Dict
+import threading
+
+T = TypeVar('T')
+
+class Operation(Protocol[T]):
+    """操作を定義するインターフェース"""
+    def execute(self, item: T) -> Any:
+        pass
+
+class ConcreteOperationA(Operation[int]):
+    """数値を2倍にする操作"""
+    def execute(self, item: int) -> int:
+        return item * 2
+
+class ConcreteOperationB(Operation[str]):
+    """文字列を大文字にする操作"""
+    def execute(self, item: str) -> str:
+        return item.upper()
+
+class Result:
+    """結果管理用クラス"""
+    def __init__(self):
+        self.success: List[Dict[str, Any]] = []
+        self.errors: List[Dict[str, Any]] = []
+        self.lock = threading.Lock()  # 排他制御のためのロック
+
+    def add_success(self, operation: str, input_item: Any, result: Any):
+        with self.lock:
+            self.success.append({
+                "operation": operation,
+                "input": input_item,
+                "result": result
+            })
+
+    def add_error(self, operation: str, input_item: Any, error_msg: str):
+        with self.lock:
+            self.errors.append({
+                "operation": operation,
+                "input": input_item,
+                "error": error_msg
+            })
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"success": self.success, "errors": self.errors}
+
+class OperationManager:
+    """操作を管理するクラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Operation) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        """選択した操作を並列に実行し、それぞれの結果を管理する"""
+        results = Result()
+
+        def run_operation(item: Any, op_name: str):
+            """各操作を実行し、結果を返す"""
+            operation = self.operations.get(op_name)
+            if operation:
+                try:
+                    result = operation.execute(item)
+                    results.add_success(op_name, item, result)
+                except Exception as e:
+                    results.add_error(op_name, item, f"エラー: {str(e)} (操作: {op_name})")
+            else:
+                results.add_error(op_name, item, f"未登録の操作: {op_name}")
+
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(run_operation, item, op_name): (item, op_name)
+                       for item in data for op_name in chosen_operations}
+            
+            for future in as_completed(futures):
+                future.result()
+
+        return results.to_dict()
+
+# 使用例
+manager = OperationManager()
+manager.register_operation("Double", ConcreteOperationA())
+manager.register_operation("Uppercase", ConcreteOperationB())
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを用いて、`ConcreteOperationA`と`ConcreteOperationB`が正しく登録されるか確認します。
+2. **並列処理テスト**: 大量のデータを使い、`run_operations`メソッドが操作を並列に実行し、処理時間が短縮されるか検証します。特に、10,000項目以上のデータに対して。
+3. **エラーメッセージテスト**: 存在しない操作を指定した場合、想定通りのエラーメッセージが返されるか確認します。
+4. **結果管理テスト**: 成功した操作と失敗した操作が適切にリストに格納され、`to_dict`メソッドで整然とした結果が取得できることを確認します。
+5. **スレッドの安全性テスト**: 排他制御テストとして、同時に複数のスレッドから`Result`クラスにアクセスし、エラーが発生しないことを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
