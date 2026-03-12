@@ -14608,3 +14608,73 @@ manager.register_operation("Uppercase", ConcreteOperationB())
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-12
+## 改善テーマ分析
+現在の実装では、操作の登録と実行に関して拡張性が制限されています。具体的には、新しい操作を追加する際にクラスを作成する必要があり、柔軟性に欠けます。また、操作の追加や変更時に既存のコードに多くの影響を及ぼす可能性があります。これにより、システム全体の変更作業が巨大になる可能性があります。このため、拡張性を考慮した改善が必要です。
+
+## 提案コード
+以下は、動的に操作を追加できるようにした拡張性の高いコードの提案です。操作を関数として登録し、使用できるようにします。
+
+```python
+from typing import Callable
+
+class OperationManager:
+    """拡張性のある操作管理クラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """操作を関数として登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        results = Result()
+
+        def run_operation(item: Any, op_name: str):
+            """各操作を実行し、結果を返す"""
+            operation = self.operations.get(op_name)
+            if operation:
+                try:
+                    result = operation(item)
+                    results.add_success(op_name, item, result)
+                except Exception as e:
+                    results.add_error(op_name, item, f"エラー: {str(e)} (操作: {op_name})")
+            else:
+                results.add_error(op_name, item, f"未登録の操作: {op_name}")
+
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(run_operation, item, op_name): (item, op_name)
+                       for item in data for op_name in chosen_operations}
+            
+            for future in as_completed(futures):
+                future.result()
+
+        return results.to_dict()
+
+# 使用例
+def double(item: int) -> int:
+    return item * 2
+
+def uppercase(item: str) -> str:
+    return item.upper()
+
+manager = OperationManager()
+manager.register_operation("Double", double)
+manager.register_operation("Uppercase", uppercase)
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを用いて、関数として登録した`double`と`uppercase`が正しく登録されるか確認します。
+2. **並列処理テスト**: 更に大量のデータ（10,000項目以上の整数や文字列）を使い、`run_operations`メソッドが操作を並列に実行し、処理時間が短縮されるか検証します。また、登録した操作がすべて成功することを確認します。
+3. **エラーメッセージテスト**: 存在しない操作を指定した場合、想定通りのエラーメッセージが返されるか確認します。
+4. **結果管理テスト**: 成功した操作と失敗した操作が適切にリストに格納され、`to_dict`メソッドで整然とした結果が取得できることを確認します。
+5. **スレッドの安全性テスト**: 排他制御テストとして、同時に複数のスレッドから`Result`クラスにアクセスし、エラーが発生しないことを確認します。
+
+## テスト結果
+- ステータス: FAIL
+- スコア: 0
+- 詳細: name 'Any' is not defined
+- ベストスコア: 0.8
+
+---
