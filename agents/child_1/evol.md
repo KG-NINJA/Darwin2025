@@ -14958,3 +14958,114 @@ manager.register_operation("Uppercase", uppercase)
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-16
+## 改善テーマ分析
+現在の`Result`クラスはデータの追跡と管理が煩雑で、アクセス競合のリスクもあります。特に、`ThreadPoolExecutor`を使用した際の並列処理は、データの整合性を損なう可能性があります。さらに、エラー処理が単純であるため、詳細な情報を記録する方法を考慮する必要があります。
+
+## 提案コード
+以下では、結果管理をさらに効率的にし、エラー通知を改善するための改良を行います。具体的には、成功およびエラーの計数を追加し、より具体的なエラーメッセージを提供します。また、明示的なエラーログを保持し、操作ごとの成功率を追跡できるようにします。
+
+```python
+from typing import Any, Dict, List, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+
+class Result:
+    """結果を管理するクラス"""
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+        self.success_count = 0
+        self.error_count = 0
+        self.lock = Lock()  # スレッド安全のためのロック
+
+    def add_success(self, operation: str, item: Any, result: Any):
+        with self.lock:
+            self.successes.append((operation, item, result))
+            self.success_count += 1
+
+    def add_error(self, operation: str, item: Any, message: str):
+        with self.lock:
+            self.errors.append((operation, item, message))
+            self.error_count += 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        with self.lock:
+            return {
+                "successes": self.successes,
+                "errors": self.errors,
+                "success_count": self.success_count,
+                "error_count": self.error_count
+            }
+
+    def clear_results(self):
+        """結果をクリアするメソッド"""
+        with self.lock:
+            self.successes.clear()
+            self.errors.clear()
+            self.success_count = 0
+            self.error_count = 0
+
+class OperationManager:
+    """拡張性のある操作管理クラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """操作を関数として登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        results = Result()
+
+        def run_operation(item: Any, op_name: str):
+            """各操作を実行し、結果を返す"""
+            operation = self.operations.get(op_name)
+            if operation:
+                try:
+                    result = operation(item)
+                    results.add_success(op_name, item, result)
+                except Exception as e:
+                    error_message = f"エラー: {str(e)} (操作: {op_name}, アイテム: {item})"
+                    results.add_error(op_name, item, error_message)
+            else:
+                results.add_error(op_name, item, f"未登録の操作: {op_name}")
+
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(run_operation, item, op_name): (item, op_name)
+                       for item in data for op_name in chosen_operations}
+            
+            for future in as_completed(futures):
+                future.result()
+
+        return results.to_dict()
+
+# 使用例
+def double(item: int) -> int:
+    return item * 2
+
+def uppercase(item: str) -> str:
+    return item.upper()
+
+manager = OperationManager()
+manager.register_operation("Double", double)
+manager.register_operation("Uppercase", uppercase)
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを用いて、`double`および`uppercase`が正しく登録されるか確認します。
+2. **並列処理テスト**: 10,000項目以上のデータを用いて、`run_operations`メソッドが操作を並列に実行し、すべての結果が正しく処理されるか確認します。また、処理時間を計測します。
+3. **エラーメッセージテスト**: 存在しない操作を指定した際、より具体的なエラーメッセージが返されるか確認します。
+4. **結果管理テスト**: 成功した操作と失敗した操作の計数が正しく更新され、`to_dict`メソッドで適切に結果が得られるか確認します。
+5. **スレッドの安全性テスト**: 複数のスレッドから`Result`クラスに同時にアクセスし、エラーが発生しないことを確認します。また、`clear_results`メソッドが機能することも確認します。
+
+これにより、効率性が向上し、エラー処理がより明確になります。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
