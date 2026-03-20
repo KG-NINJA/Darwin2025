@@ -15349,3 +15349,90 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-20
+
+## 改善テーマ分析
+現在のコードにはエラーハンドリングの整備が必要であり、未登録の操作に対するエラーメッセージが不十分です。また、スレッド安全性のためのロギングは実施されていますが、データの収集と管理の複雑さが、処理性能に影響を与えています。このため、特に高負荷時に効率が低下する危険があります。エラーメッセージがもっとわかりやすければ、ユーザビリティも向上します。これらの課題を解決するために、運用効率を高める提案を考えます。
+
+## 提案コード
+以下は、エラーハンドリングを改善し、性能を向上させたバージョンのコードです。エラーメッセージを具体化し、結果の収集をスレッドセーフに行いつつ、処理を効率的に行います。
+
+```python
+from threading import Lock
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Callable
+
+class Result:
+    """結果を管理するクラス"""
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+        self.lock = Lock()
+
+    def add_success(self, operation: str, item: Any, result: Any):
+        with self.lock:
+            self.successes.append((operation, item, result))
+
+    def add_error(self, operation: str, item: Any, message: str):
+        with self.lock:
+            self.errors.append((operation, item, message))
+
+    def to_dict(self) -> Dict[str, Any]:
+        with self.lock:
+            return {
+                "successes": self.successes,
+                "errors": self.errors,
+            }
+
+class OperationManager:
+    """拡張性のある操作管理クラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operations(self, operations: Dict[str, Callable[[Any], Any]]) -> None:
+        """複数の操作を関数として登録する"""
+        self.operations.update(operations)
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        results = Result()
+
+        def run_operation(item: Any, op_name: str):
+            """各操作を実行し、結果を返す"""
+            operation = self.operations.get(op_name)
+            if operation is None:
+                results.add_error(op_name, item, f"未登録の操作: '{op_name}' を指定されています。正しい操作名を使用してください。")
+                return
+
+            try:
+                result = operation(item)
+                results.add_success(op_name, item, result)
+            except Exception as e:
+                error_message = f"操作 '{op_name}' にてエラーが発生: {str(e)}"
+                results.add_error(op_name, item, error_message)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:  # スレッド数を適切に管理
+            futures = {executor.submit(run_operation, item, op_name): (item, op_name)
+                       for item in data for op_name in chosen_operations}
+
+            for future in as_completed(futures):
+                future.result()
+
+        return results.to_dict()
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operations`メソッドを使って、`double`や`uppercase`関数が正しく登録されるかを確認します。
+2. **未登録操作テスト**: 存在しない操作名を指定した場合、具体的でフレンドリーなエラーメッセージが返されるかを確認します。
+3. **並列処理テスト**: `run_operations`メソッドが10,000以上のデータ項目を正しく並列処理できるかを確認します。
+4. **結果検証テスト**: `to_dict`メソッドで成功とエラーが正しく記録されるかを確認します。
+
+これにより、直感的なエラーハンドリングと効率的な処理が実現され、ユーザビリティが向上します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
