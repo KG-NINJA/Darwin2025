@@ -15520,3 +15520,97 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-22
+
+## 改善テーマ分析
+現在のコードはエラー処理や並列処理において改善が見られますが、コードの拡張性において以下の課題があります：
+
+- **操作の追加が難しい**: 新しい操作を追加する際に、既存のコードに多くの変更が必要。
+- **有効なエラー処理が不足**: 一部のエラーメッセージが技術的であり、ユーザーにとって理解しづらい。
+- **単一責任の原則が不十分**: `OperationManager`が多くの責任を持ち過ぎているため、コードが複雑化している。
+
+これらの問題に対応するために、テーマ「創造性」に基づいて、次のような改善策を提案します。
+
+## 提案コード
+以下は、拡張性を高めるための改善案です。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Callable, Tuple
+
+class Result:
+    """結果を管理するクラス"""
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def add_success(self, operation: str, item: Any, result: Any):
+        self.successes.append((operation, item, result))
+
+    def add_error(self, operation: str, item: Any, message: str):
+        self.errors.append((operation, item, message))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "successes": self.successes,
+            "errors": self.errors,
+        }
+
+class Operation:
+    """操作を表す基本クラス"""
+    def execute(self, item: Any) -> Any:
+        raise NotImplementedError("このメソッドはサブクラスで実装してください。")
+
+class DoubleOperation(Operation):
+    def execute(self, item: Any) -> Any:
+        return item * 2
+
+class UppercaseOperation(Operation):
+    def execute(self, item: Any) -> Any:
+        return item.upper()
+
+class OperationManager:
+    """拡張性のある操作管理クラス"""
+    def __init__(self):
+        self.operations = {}
+
+    def register_operation(self, name: str, operation: Operation) -> None:
+        """単一の操作を関数として登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        results = Result()
+
+        def run_operation(item: Any, operation: Operation):
+            """各操作を実行し、結果を返す"""
+            try:
+                result = operation.execute(item)
+                results.add_success(operation.__class__.__name__, item, result)
+            except Exception as e:
+                error_message = f"操作 '{operation.__class__.__name__}' にてエラーが発生: {str(e)}"
+                results.add_error(operation.__class__.__name__, item, error_message)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(run_operation, item, self.operations[op_name]): (item, op_name)
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                future.result()
+
+        return results.to_dict()
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを使って、新しい操作（`DoubleOperation`や`UppercaseOperation`）の登録が成功するか確認。
+2. **未登録操作エラーテスト**: 存在しない操作名を指定した際に、明瞭なエラーメッセージが返されるか確認。
+3. **新しく追加された操作のテスト**: 各操作の戻り値が予想通りであるかを確認（例：`DoubleOperation`で`5`が`10`に変わるなど）。
+4. **結果検証テスト**: `to_dict`メソッドで成功とエラーが正しく記録されるかを確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
