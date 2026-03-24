@@ -15702,3 +15702,95 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-24
+
+## 改善テーマ分析
+現在のコードには以下の問題点があります：
+
+- **競合状態**: `ThreadPoolExecutor`を使用しているため、同時に実行される操作の間で競合が発生しやすい。これにより結果の整合性が損なわれる可能性がある。
+- **エラーハンドリング**: 例外メッセージがユーザーにとって具体的な情報を返さないため、デバッグが難しい。
+- **テストの自動化**: 現在のテストメソッドは手動で全部実行する必要があるため、時間とコストがかかる。
+
+これらを解消するために、以下のアプローチを提案します。
+
+## 提案コード
+```python
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Tuple, Union
+
+class Result:
+    """結果を管理するクラス"""
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def add_success(self, operation: str, item: Any, result: Any):
+        self.successes.append((operation, item, result))
+
+    def add_error(self, operation: str, item: Any, message: str):
+        self.errors.append((operation, item, message))
+
+    def to_dict(self) -> Dict[str, Union[List[Tuple[str, Any, Any]], List[Tuple[str, Any, str]]]]:
+        return {
+            "successes": self.successes,
+            "errors": self.errors,
+        }
+
+class OperationManager:
+    """安定性向上の操作管理クラス"""
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str]) -> Dict[str, Any]:
+        results = Result()
+
+        def run_operation(item: Any, operation: Callable[[Any], Any], operation_name: str):
+            """各操作を実行し、結果を返す"""
+            try:
+                result = operation(item)
+                results.add_success(operation_name, item, result)
+            except Exception as e:
+                error_message = self._generate_error_message(operation_name, item, str(e))
+                results.add_error(operation_name, item, error_message)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(run_operation, item, self.operations[op_name], op_name): item
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in futures:
+                future.result()
+
+        return results.to_dict()
+
+    def _generate_error_message(self, operation_name: str, item: Any, error: str) -> str:
+        """より具体的なエラーメッセージを生成する"""
+        return f"操作 '{operation_name}' の実行中にエラーが発生しました。アイテム: {item}, エラー: {error}"
+
+# 使用例
+if __name__ == "__main__":
+    manager = OperationManager()
+    manager.register_operation("double", lambda x: x * 2)
+    manager.register_operation("uppercase", lambda x: x.upper())
+    result = manager.run_operations(["hello", 1, 2, 3], ["double", "uppercase"])
+    print(result)
+```
+
+## テスト方法
+1. **操作登録テスト**: `register_operation`メソッドを使用して、新しい操作の登録が成功することを確認。
+2. **操作実行テスト**: 登録された各操作（例：`double`, `uppercase`）が、期待される戻り値を返すかを確認。
+3. **エラーメッセージ確認**: 未登録の操作名を指定した際に、より具体的なエラーメッセージが取得できることを確認。
+4. **結果検証**: `to_dict`メソッドで成功とエラーが適切にレポートされることを確認。
+5. **自動化テスト**: pytest等を利用し、テストを自動化して全体を通しての安定性を評価。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
