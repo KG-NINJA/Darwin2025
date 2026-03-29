@@ -16183,3 +16183,100 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-03-29
+
+## 改善テーマ分析
+現在のコードには以下の問題があります：
+
+- **動的な操作の管理課題**: 新しい操作をすぐに追加できないため、最適化が難しい。
+- **スレッド制御の柔軟性不足**: `max_workers`の設定が柔軟でないため、リソースの最適活用ができていない。
+- **エラーハンドリングの一貫性欠如**: 特定のエラーは明示的にキャッチされず、デバッグが手間になる。
+
+## 提案コード
+以下の改善コードでは、動的な操作の追加を容易にし、スレッド制御を改善し、エラーハンドリングを一元化しています。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List, Union
+
+class Result:
+    """結果を管理するクラス"""
+
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def add_success(self, operation: str, item: Any, result: Any):
+        self.successes.append((operation, item, result))
+
+    def add_error(self, operation: str, item: Any, message: str):
+        self.errors.append((operation, item, message))
+
+    def to_dict(self) -> Dict[str, Union[List[str], List[str]]]:
+        return {"successes": self.successes, "errors": self.errors}
+
+class OperationManager:
+    """操作管理クラス"""
+
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = max_workers or len(data)
+
+        def run_operation(item: Any, operation: Callable[[Any], Any], operation_name: str):
+            """各操作を実行し、結果を返す"""
+            try:
+                result = operation(item)
+                results.add_success(operation_name, item, result)
+            except Exception as e:
+                results.add_error(operation_name, item, self._generate_error_message(operation_name, item, str(e)))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(run_operation, item, self.operations[op_name], op_name): item
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                try:
+                    future.result()
+                except Exception:
+                    results.add_error("Unknown", item, "未指定のエラーが発生しました。")
+
+        return results.to_dict()
+
+    def _generate_error_message(self, operation_name: str, item: Any, error: str) -> str:
+        """エラーメッセージを生成する"""
+        return f"操作 '{operation_name}' の実行中にエラーが発生しました。アイテム: {item}, エラー: {error}"
+
+# 使用例
+if __name__ == "__main__":
+    manager = OperationManager()
+    manager.register_operation("double", lambda x: x * 2)
+    manager.register_operation("uppercase", lambda x: x.upper())
+    result = manager.run_operations(["hello", 1, 2, 3], ["double", "uppercase"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **操作登録テスト**: 新たに操作を追加し、それが成功することを確認する。
+2. **スレッド数設定検証**: 異なる`max_workers`値での動作を確認し、スレッドが正常に動作するかテストする。
+3. **エラーメッセージ確認**: 不適切な操作名を入力した際に、一貫したエラーメッセージが利用されることを確認する。
+4. **結果整合性確認**: `to_dict`メソッドにより、成功とエラーが正しく記録されることを確認する。
+5. **パフォーマンステスト**: 大規模データセットで動作を確認し、性能を評価する。
+
+この改善により、安定性と作用の直感的な理解が大幅に向上することを期待します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
