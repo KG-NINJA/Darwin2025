@@ -16575,3 +16575,114 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-02
+
+## 改善テーマ分析
+現在のアルゴリズムでは、`Result`クラスが定義されていないため、エラーハンドリングや結果管理のロジックが機能していません。また、操作の拡張性が不足し、新しい操作を追加する際にコードの変更点が多くなる傾向があります。これにより、保守性とテストが困難になります。 
+
+提案する改善としては、`Result`クラスを明確に定義し、操作の追加を容易にするためのインターフェースを整備することです。これにより、拡張性を高めつつ、コードの可読性を改善します。
+
+## 提案コード
+以下のコードブロックでは、`Result`クラスを追加し、操作の管理と結果の管理をより明確に分離しています。これにより、新しい操作を簡単に追加することが可能です。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List, Tuple, Union
+
+class Result:
+    """操作結果を管理するクラス"""
+    
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+class EnhancedOperationManager:
+    """動的な操作を管理するクラス"""
+
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._run_single_operation, item, op_name): item 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return max_workers or len(data)
+
+    def _run_single_operation(self, item: Any, operation_name: str) -> Union[Tuple[bool, Any, str], Tuple[bool, Any, None]]:
+        operation = self.operations[operation_name]
+        max_retries = 3  # 再試行回数
+        for attempt in range(max_retries):
+            try:
+                result = operation(item)
+                return (True, item, result)  # 成功
+            except Exception as e:
+                error_msg = self._generate_error_message(operation_name, item, str(e))
+                if attempt < max_retries - 1:
+                    continue  # 再試行
+                else:
+                    return (False, item, error_msg)  # 最終的なエラー返却
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception:
+            results.add_error("Unknown", item, "未指定のエラーが発生しました。")
+
+    def _generate_error_message(self, operation_name: str, item: Any, error: str) -> str:
+        return f"操作 '{operation_name}' の実行中にエラーが発生しました。アイテム: {item}, エラー: {error}"
+
+# 使用例
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2)
+    manager.register_operation("uppercase", lambda x: x.upper())
+    result = manager.run_operations(["hello", 1, 2, 3], ["double", "uppercase"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **再試行テスト**: 不正なアイテムを渡し、最大3回まで操作が再試行され、最終的に適切なエラーメッセージが返されることを確認します。
+2. **エラーメッセージ検証**: 不適切な操作名を使用した際、詳細なエラーメッセージが表示されることをチェックします。
+3. **成功時の確認**: 正常なデータを使用し、各操作が期待通りに成功した際の結果を確認する。
+4. **スレッド数設定検証**: 異なる`max_workers`値を使用して、パフォーマンスが期待通りに動作することを確認します。
+5. **結果整合性確認**: `to_dict`メソッドを用いて、成功とエラーが適切に記録されているかチェックします。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
