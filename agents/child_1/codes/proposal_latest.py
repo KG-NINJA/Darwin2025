@@ -1,6 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Tuple, Union
-
 class Result:
     """操作結果を管理するクラス"""
     
@@ -36,7 +33,9 @@ class EnhancedOperationManager:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(self._execute_with_retries, item, op_name): item 
-                       for item in data for op_name in chosen_operations if op_name in self.operations}
+                       for item in data 
+                       for op_name in chosen_operations 
+                       if op_name in self.operations}
 
             for future in as_completed(futures):
                 item = futures[future]
@@ -47,14 +46,13 @@ class EnhancedOperationManager:
     def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
         return max_workers or len(data)
 
-    def _execute_with_retries(self, item: Any, operation_name: str) -> Union[Tuple[bool, Any, str], Tuple[bool, Any, None]]:
-        max_retries = 3  # 再試行回数
-        for attempt in range(max_retries):
+    def _execute_with_retries(self, item: Any, operation_name: str) -> Union[Tuple[bool, Any, str]]:
+        for attempt in range(3):  # 再試行回数
             success, result, error_msg = self._run_single_operation(item, operation_name)
             if success:
                 return (True, item, result)  # 成功
-            elif attempt == max_retries - 1:
-                return (False, item, error_msg)  # 最終的なエラー返却
+            if attempt == 2:  # 最終的なエラー返却
+                return (False, item, error_msg)
 
     def _run_single_operation(self, item: Any, operation_name: str) -> Union[Tuple[bool, Any, str]]:
         operation = self.operations[operation_name]
@@ -62,7 +60,7 @@ class EnhancedOperationManager:
             result = operation(item)
             return (True, result, None)  # 成功
         except Exception as e:
-            error_msg = self._generate_error_message(operation_name, item, str(e))
+            error_msg = f"操作 '{operation_name}' ログ: {item}, エラー: {str(e)}"
             return (False, None, error_msg)  # エラー
 
     def _handle_future_result(self, future, item: Any, results: Result):
@@ -74,9 +72,6 @@ class EnhancedOperationManager:
                 results.add_error(item, result)
         except Exception:
             results.add_error("Unknown", item, "未指定のエラーが発生しました。")
-
-    def _generate_error_message(self, operation_name: str, item: Any, error: str) -> str:
-        return f"操作 '{operation_name}' の実行中にエラーが発生しました。アイテム: {item}, エラー: {error}"
 
 # 使用例
 if __name__ == "__main__":

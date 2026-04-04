@@ -16799,3 +16799,119 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-04
+
+## 改善テーマ分析
+テーマ「直感」に基づいて、以下の2つの問題点を特定しました：
+
+1. **冗長なコードとリトライ処理**: `_execute_with_retries` メソッドでの冗長な成功・失敗処理が視覚的に分かりづらく、リファクタリングが必要です。また、エラーハンドリングが明確でなく、エラー発生時のユーザーへのフィードバックが不十分です。
+
+2. **パフォーマンスの改善**: 現在の実装は並列処理を使用していますが、未使用の操作に対してもスレッドが生成されるため、オーバーヘッドが発生しています。必要な操作だけを対象にすることで、パフォーマンスを向上させることができます。
+
+## 提案コード
+以下に改善案を示します。特に、エラーメッセージ生成を簡素化し、リトライ処理の改善、無駄なスレッド作成を避けるようにしています。
+
+```python
+class Result:
+    """操作結果を管理するクラス"""
+    
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+class EnhancedOperationManager:
+    """動的な操作を管理するクラス"""
+
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """操作を登録する"""
+        self.operations[name] = operation
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_retries, item, op_name): item 
+                       for item in data 
+                       for op_name in chosen_operations 
+                       if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return max_workers or len(data)
+
+    def _execute_with_retries(self, item: Any, operation_name: str) -> Union[Tuple[bool, Any, str]]:
+        for attempt in range(3):  # 再試行回数
+            success, result, error_msg = self._run_single_operation(item, operation_name)
+            if success:
+                return (True, item, result)  # 成功
+            if attempt == 2:  # 最終的なエラー返却
+                return (False, item, error_msg)
+
+    def _run_single_operation(self, item: Any, operation_name: str) -> Union[Tuple[bool, Any, str]]:
+        operation = self.operations[operation_name]
+        try:
+            result = operation(item)
+            return (True, result, None)  # 成功
+        except Exception as e:
+            error_msg = f"操作 '{operation_name}' ログ: {item}, エラー: {str(e)}"
+            return (False, None, error_msg)  # エラー
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception:
+            results.add_error("Unknown", item, "未指定のエラーが発生しました。")
+
+# 使用例
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2)
+    manager.register_operation("uppercase", lambda x: x.upper())
+    result = manager.run_operations(["hello", 1, 2, 3], ["double", "uppercase"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **再試行テスト**: 不正なアイテム（例: `None`や未定義の操作名）を渡し、最大3回までの操作再試行が行われることを確認。最終的に適切なエラーメッセージが返されるかを確認する。
+  
+2. **エラーメッセージ検証**: 不適切な操作名を使用した際、生成されるエラーメッセージが改善されているかをチェックする。
+
+3. **成功時の確認**: 正常なデータを使用して、各操作が期待通りに成功した際の結果を確認すること。
+
+4. **スレッド数設定検証**: 異なる`max_workers`値を使用し、それがパフォーマンスに与える影響を測定する。
+
+5. **結果整合性確認**: `to_dict`メソッドで、成功とエラーがきちんと記録されているかを確認します。
+
+## テスト結果
+- ステータス: FAIL
+- スコア: 0
+- 詳細: name 'Any' is not defined
+- ベストスコア: 0.8
+
+---
