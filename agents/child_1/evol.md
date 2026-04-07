@@ -17146,3 +17146,118 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-07
+
+## 改善テーマ分析
+現在の実装の主な問題点は、エラーメッセージと操作の登録に関する柔軟性の欠如です。また、動的な操作の管理が拡張性の観点から十分でなく、新しい操作や異なるデータ型に対する対応が難しいことが分かりました。
+
+1. **エラーメッセージの不明瞭さ**: エラーメッセージは操作名に依存していますが、エラーの原因が具体的に示されていない場合があります。
+2. **操作登録のハードコーディング**: 現在の操作登録システムは手動での登録を要求し、動的に変更できる機能が不足しています。
+3. **再利用性の低さ**: 個々の操作の最大の再試行回数はクラス変数として設定されていますが、これを個々の操作ごとに設定できるようにすることで、よりスケーラブルな設計にできます。
+
+これらを考慮し、「拡張性」テーマに基づいて以下の改善案を提案します。
+
+## 提案コード
+以下は、上記の分析に基づいてエラーメッセージの明確化、動的な操作登録機能の強化、および操作固有の再試行回数の設定機能を追加したコードです。
+
+```python
+from typing import List, Dict, Any, Callable, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class Result:
+    def __init__(self):
+        self.successes: List[Tuple[Any, Any]] = []
+        self.errors: List[Tuple[Any, str]] = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+class EnhancedOperationManager:
+    """動的な操作を管理するクラス"""
+
+    def __init__(self):
+        self.operations: Dict[str, Tuple[Callable[[Any], Any], int]] = {}
+        
+    def register_operation(self, name: str, operation: Callable[[Any], Any], retries: int = 3) -> None:
+        """操作を登録する"""
+        self.operations[name] = (operation, retries)
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_retries, item, op_name): item 
+                       for item in data 
+                       for op_name in chosen_operations
+                       if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return max_workers or len(data)
+
+    def _execute_with_retries(self, item: Any, operation_name: str) -> Tuple[bool, Any, str]:
+        operation, retries = self.operations[operation_name]
+        for attempt in range(retries):
+            success, result, error_msg = self._run_single_operation(item, operation)
+            if success:
+                return (True, item, result)
+            error_msg += f" (Attempt {attempt + 1}/{retries})"
+        return (False, item, error_msg)
+
+    def _run_single_operation(self, item: Any, operation: Callable[[Any], Any]) -> Tuple[bool, Any, str]:
+        try:
+            result = operation(item)
+            return (True, result, None)
+        except Exception as e:
+            error_msg = f"Operation failed for item '{item}': {str(e)}"
+            return (False, None, error_msg)
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception as e:
+            results.add_error(item, f"Unexpected error: {str(e)}")
+
+# Example usage
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2 if isinstance(x, (int, float)) else (1/0), retries=2)
+    manager.register_operation("uppercase", lambda x: x.upper() if isinstance(x, str) else (1/0), retries=3)
+    result = manager.run_operations(["hello", 1, 2, 3, None], ["double", "uppercase", "undefined_operation"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **再試行テスト**: 不正なアイテムや未定義の操作名を渡し、設定された最大の再試行回数が効果的に適用されることを確認します。
+2. **エラーメッセージ検証**: 無効な操作名またはアイテムに対するエラーメッセージが詳細かつ明確であるかをチェックします。具体的にどの操作が失敗したかが示されていることを確認します。
+3. **成功時の確認**: 有効なデータを提供し、操作が正しく成功することを確認します。
+4. **スレッド数設定検証**: `max_workers`を異なる値に設定し、負荷の影響を測定します。
+5. **結果整合性確認**: `to_dict`メソッドによって、成功とエラーの結果が正確に記録されているかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
