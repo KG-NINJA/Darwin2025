@@ -17485,3 +17485,113 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-10
+
+## 改善テーマ分析
+### 現在の問題点
+- **エラーハンドリングの不備**: 現在は基本的なエラーメッセージしか提供しておらず、トラブルシューティングが難しい。
+- **パフォーマンスの向上余地**: 同時に実行される操作が多くなると、スレッド管理が非最適化の可能性がある。さらに、現在のアプローチが無駄な再試行を生む可能性がある。
+
+### 効率の改善案
+1. **エラーメッセージ強化**: より詳細で役に立つエラーメッセージを提供し、問題特定の助けとなるように。
+2. **スレッドプールの効率化**: スレッドの数を自動調整し、過負荷を防止すること。また、タスクの重要度に応じた優先順位処理を実装する。
+3. **条件付きリトライ**: 不要な再試行を排除するために、エラータイプに基づく条件付けを行う。
+
+## 提案コード
+```python
+from typing import List, Dict, Any, Callable, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class Result:
+    def __init__(self):
+        self.successes: List[Tuple[Any, Any]] = []
+        self.errors: List[Tuple[Any, str]] = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+class EnhancedOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Tuple[Callable[[Any], Any], int]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any], retries: int = 3) -> None:
+        self.operations[name] = (operation, retries)
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_retries, item, op_name): item 
+                       for item in data 
+                       for op_name in chosen_operations
+                       if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return max_workers or min(len(data), 10)  # クラウド環境の最適化を考慮
+
+    def _execute_with_retries(self, item: Any, operation_name: str) -> Tuple[bool, Any, str]:
+        operation, retries = self.operations[operation_name]
+        for attempt in range(retries):
+            success, result, error_msg = self._run_single_operation(item, operation)
+            if success:
+                return (True, item, result)
+            error_msg = f"{error_msg} (Attempt {attempt + 1}/{retries})"
+        return (False, item, error_msg)
+
+    def _run_single_operation(self, item: Any, operation: Callable[[Any], Any]) -> Tuple[bool, Any, str]:
+        try:
+            result = operation(item)
+            return (True, result, None)
+        except Exception as e:
+            return (False, None, f"Operation '{operation.__name__}' for item '{item}' failed: {str(e)}")
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception as e:
+            results.add_error(item, f"Unexpected error while processing item '{item}': {str(e)}")
+
+# 例示的な使用
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2 if isinstance(x, (int, float)) else (1/0), retries=2)
+    manager.register_operation("uppercase", lambda x: x.upper() if isinstance(x, str) else (1/0), retries=3)
+    result = manager.run_operations(["hello", 1, 2, 3, None], ["double", "uppercase", "undefined_operation"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **再試行テスト**: 無効な入力や未定義の操作を使い、期待通りの再試行が行われるか確認。
+2. **エラーメッセージ検証**: エラーメッセージに詳細情報が含まれるかチェック。
+3. **成功時確認**: 有効なデータの場合、正しい結果が得られることを確認。
+4. **スレッド数設定検証**: 様々な`max_workers`の設定で、パフォーマンスが安定するか確認します。
+5. **結果整合性確認**: `to_dict`メソッドで期待通りに結果が記録されているか検証。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
