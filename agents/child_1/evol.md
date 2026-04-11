@@ -17595,3 +17595,114 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-11
+
+## 改善テーマ分析
+現在のアルゴリズムは、スレッドプールの効率化や条件付きリトライ機能を実装していますが、以下の問題点があります：
+- **エラーハンドリング**: エラー処理が具体的なケースに対して柔軟ではなく、すべてのエラーを一律に処理しているため、混乱を招くことがあります。
+- **操作の拡張性**: 新しい操作を追加する際に、既存のコードに大きな影響を与える可能性があるため、拡張性に欠けています。
+- **リトライロジック**: リトライの条件が固定されているため、特定の状況に応じた柔軟性がありません。
+
+改善案として、エラーハンドリングを強化し、ユーザーが新しい操作を簡単に追加できるようにすること、そしてリトライ条件を引数として柔軟に設定できるようにすることを提案します。
+
+## 提案コード
+```python
+from typing import List, Dict, Any, Callable, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class Result:
+    def __init__(self):
+        self.successes: List[Tuple[Any, Any]] = []
+        self.errors: List[Tuple[Any, str]] = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+class EnhancedOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Tuple[Callable[[Any], Any], Dict[str, Any]]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any], options: Dict[str, Any] = None) -> None:
+        # options はRetries, Timeoutなどの設定を可能にします
+        self.operations[name] = (operation, options or {})
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_retries, item, op_name): item 
+                       for item in data 
+                       for op_name in chosen_operations
+                       if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return max_workers or min(len(data), 10)
+
+    def _execute_with_retries(self, item: Any, operation_name: str) -> Tuple[bool, Any, str]:
+        operation, options = self.operations[operation_name]
+        retries = options.get('retries', 3)
+
+        for attempt in range(retries):
+            success, result, error_msg = self._run_single_operation(item, operation)
+            if success:
+                return (True, item, result)
+            error_msg = f"{error_msg} (Attempt {attempt + 1}/{retries})"
+
+        return (False, item, error_msg)
+
+    def _run_single_operation(self, item: Any, operation: Callable[[Any], Any]) -> Tuple[bool, Any, str]:
+        try:
+            result = operation(item)
+            return (True, result, None)
+        except Exception as e:
+            return (False, None, f"Operation '{operation.__name__}' for item '{item}' failed: {str(e)}")
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception as e:
+            results.add_error(item, f"Unexpected error while processing item '{item}': {str(e)}")
+
+# 例示的な使用
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2 if isinstance(x, (int, float)) else (1/0), options={"retries": 2})
+    manager.register_operation("uppercase", lambda x: x.upper() if isinstance(x, str) else (1/0), options={"retries": 3})
+    result = manager.run_operations(["hello", 1, 2, 3, None], ["double", "uppercase"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **エラーハンドリングテスト**: 登録した操作が無効なデータで呼び出され、正しくエラーメッセージが返されるか確認。
+2. **オプション設定の検証**: 各操作に対するオプション（リトライ回数）が適切に設定・反映されるか確認。
+3. **動的操作テスト**: 新しい操作を柔軟に追加し、その機能とエラーハンドリングが正しく動作するか確認。
+4. **スレッド処理の安定性確認**: 様々な`max_workers`の設定で、処理が安定しているかを確認し、性能評価を行います。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
