@@ -17814,3 +17814,122 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-13
+
+## 改善テーマ分析
+現在のコードはリトライ機能やエラーハンドリングが実装されていますが、以下の問題点があります:
+- エラーメッセージがユーザーにとって十分にわかりやすくない場合がある。
+- スレッドの数が上限に達すると、性能に影響を及ぼす可能性がある。
+- リトライ機能の構成が固定されており、柔軟性に欠ける。
+
+これらの点を踏まえ、安定性を向上させるための改善案として、エラーハンドリングの強化とリトライのダイナミック管理を提案します。
+
+## 提案コード
+以下は、エラーメッセージを改善し、リトライの回数や間隔を動的に設定できるようにしたコードです。
+
+```python
+from typing import List, Dict, Any, Callable, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+
+class Result:
+    def __init__(self):
+        self.successes: List[Tuple[Any, Any]] = []
+        self.errors: List[Tuple[Any, str]] = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+
+class EnhancedOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Tuple[Callable[[Any], Any], Dict[str, Any]]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any], options: Dict[str, Any] = None) -> None:
+        self.operations[name] = (operation, options or {})
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_retries, item, op_name): item 
+                       for item in data 
+                       for op_name in chosen_operations
+                       if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return min(max_workers or len(data), 10)
+
+    def _execute_with_retries(self, item: Any, operation_name: str) -> Tuple[bool, Any, str]:
+        operation, options = self.operations[operation_name]
+        retries = options.get('retries', 3)
+        delay = options.get('delay', 1)
+
+        for attempt in range(retries):
+            success, result, error_msg = self._run_single_operation(item, operation)
+            if success:
+                return (True, item, result)
+            error_msg = f"{error_msg} (Attempt {attempt + 1}/{retries})"
+            time.sleep(delay)  
+
+        return (False, item, f"Final Error: {error_msg}")  # 最終エラーメッセージを標準化
+
+    def _run_single_operation(self, item: Any, operation: Callable[[Any], Any]) -> Tuple[bool, Any, str]:
+        try:
+            result = operation(item)
+            return (True, result, None)
+        except Exception as e:
+            return (False, None, f"Operation '{operation.__name__}' for item '{item}' failed due to: {str(e)}")
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception as e:
+            results.add_error(item, f"Unexpected Error while processing item '{item}': {str(e)}")
+
+
+# 使用例（テストベースに適用）
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2 if isinstance(x, (int, float)) else (1/0), options={"retries": 2, "delay": 1})
+    manager.register_operation("uppercase", lambda x: x.upper() if isinstance(x, str) else (1/0), options={"retries": 3, "delay": 0.5})
+    result = manager.run_operations(["hello", 1, 2, 3, None], ["double", "uppercase"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **エラーハンドリングテスト**: 各エラーメッセージがわかりやすくなったか確認し、対応する動作が正しいかを検証します。
+2. **リトライ機能検証**: リトライの回数や間隔を変更し、その結果が正しいかのチェックを行います。
+3. **性能ベンチマーク**: 様々な`max_workers`での実行性能を測定し、どの程度安定しているか評価します。
+4. **新しい操作のダイナミック登録テスト**: 簡単な操作を新しく登録し、その機能が正常に動作することを確認します。 
+
+安定性を高めるためのこれらの変更により、リトライ機能とエラーメッセージの精確性が向上し、パフォーマンスが維持されることを期待しています。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
