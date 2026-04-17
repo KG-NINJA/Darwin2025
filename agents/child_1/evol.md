@@ -18301,3 +18301,126 @@ if __name__ == "__main__":
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-17
+
+## 改善テーマ分析
+現在のアルゴリズムでは、以下の拡張性の問題点が存在します：
+- **ハードコーディングされた操作**: 新しい操作を追加するたびに、コード内での変更が必要です。これにより、メンテナンスが煩雑になり、エラーの可能性が増加します。
+- **運用の柔軟性が低い**: 新しい操作を異なる方法で登録・実行することができず、動的な操作追加がしづらいです。
+- **エラーハンドリングの分散**: エラー処理ロジックが分かれているため、全体の可読性と管理が難しくなっています。
+
+## 提案コード
+以下の改善案を実装します：
+- エラーハンドリングを共通化し、可読性を向上させます。
+- 操作の登録をもう少し柔軟に行い、Functionalityの追加を容易にします。
+
+```python
+from typing import Callable, Any, Dict, List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+import time
+
+class Result:
+    def __init__(self):
+        self.successes = []
+        self.errors = []
+
+    def add_success(self, item: Any, result: Any) -> None:
+        self.successes.append((item, result))
+
+    def add_error(self, item: Any, error_msg: str) -> None:
+        self.errors.append((item, error_msg))
+
+    def to_dict(self) -> Dict[str, List[Tuple]]:
+        return {
+            'successes': self.successes,
+            'errors': self.errors
+        }
+
+class EnhancedOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Tuple[Callable[[Any], Any], Dict[str, Any]]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any], options: Dict[str, Any] = None) -> None:
+        self.operations[name] = (operation, options or {})
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = Result()
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_options, item, op_name): item for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item = futures[future]
+                self._handle_future_result(future, item, results)
+
+        return results.to_dict()
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return min(max_workers or len(data), 10)
+
+    def _execute_with_options(self, item: Any, operation_name: str) -> Tuple[bool, Any, str]:
+        operation, options = self.operations[operation_name]
+        retries = options.get('retries', 1)
+        max_delay = options.get('max_delay', 3)
+
+        for attempt in range(retries):
+            delay = min(max_delay, (attempt + 1) ** 2)  # ディレイを指数的に増加
+            success, result, error_msg = self._run_single_operation(item, operation)
+
+            if success:
+                return (True, item, result)
+
+            logging.warning(f"Retrying {operation_name} for item {item}: {error_msg} (Attempt {attempt + 1}/{retries})")
+            time.sleep(delay)
+
+        return (False, item, f"Operation '{operation_name}' failed after {retries} attempts: {error_msg}")
+
+    def _run_single_operation(self, item: Any, operation: Callable[[Any], Any]) -> Tuple[bool, Any, str]:
+        try:
+            result = operation(item)
+            return (True, result, None)
+        except Exception as e:
+            return (False, None, f"Operation '{operation.__name__}' for item '{item}' failed due to: {str(e)}")
+
+    def _handle_future_result(self, future, item: Any, results: Result):
+        try:
+            success, item, result = future.result()
+            if success:
+                results.add_success(item, result)
+            else:
+                results.add_error(item, result)
+        except Exception as e:
+            results.add_error(item, f"Unexpected Error while processing item '{item}': {str(e)}")
+
+# 使用例（テストベースに適用）
+if __name__ == "__main__":
+    manager = EnhancedOperationManager()
+    manager.register_operation("double", lambda x: x * 2 if isinstance(x, (int, float)) else (1/0), options={"retries": 2, "max_delay": 2})
+    manager.register_operation("uppercase", lambda x: x.upper() if isinstance(x, str) else (1/0), options={"retries": 3, "max_delay": 1})
+    result = manager.dynamic_run_operations(["hello", 1, 2, 3, None], ["double", "uppercase"], max_workers=3)
+    print(result)
+```
+
+## テスト方法
+1. **エラーハンドリングテスト**:
+   - 不正なデータ（例: `None`や非文字列）を`double`と`uppercase`操作に提供し、発生するエラーメッセージが正しいか確認します。また、正常系のデータに対しても成功メッセージが返ることを確認します。
+
+2. **リトライ機能検証**:
+   - `retries`と`max_delay`を異なる設定で実行し、リトライ成功率とログに記録された出力を確認します。リトライの都度、遅延が正しく適用され、正しい回数試行されたかをチェックします。
+
+3. **性能ベンチマーク**:
+   - `max_workers`の異なる数値でアルゴリズムをテストし、全体の処理時間を測定して、効率を比較します。
+
+4. **動的な操作登録テスト**:
+   - 新しい操作（例えば`tripler`など）を登録し、動作が期待通りであるか確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
