@@ -18531,3 +18531,99 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-19
+
+## 改善テーマ分析
+現在のアルゴリズムは、エラーハンドリングとリトライ機能の追加に成功しましたが、さらなる効率性を向上させる要素が必要です。特に、マルチスレッド処理におけるリソースの利用効率や処理速度の最適化が求められています。また、操作の動的登録において、要求された操作の検証をより高めることが重要です。この改善により、直感的なエラー処理が実現できるでしょう。
+
+## 提案コード
+以下のコードでは、マルチスレッド処理の際の効率を向上させるために、タスクの結果を即座に処理するメカニズムを追加しました。これにより、メモリ管理が改善され、全体的なパフォーマンスが向上します。
+
+```python
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List, Tuple
+
+class EnhancedOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Tuple[Callable[[Any], Any], Dict[str, Any]]] = {}
+        self.errors = []
+        self.successes = []
+    
+    def register_operation(self, name: str, operation: Callable[[Any], Any], options: Dict[str, Any] = None) -> None:
+        self.operations[name] = (operation, options or {})
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = None) -> Dict[str, Any]:
+        results = {'successes': [], 'errors': []}
+        max_workers = self._initialize_worker_count(max_workers, data)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_with_options, item, op_name): item 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                self._process_future_result(future, results)
+
+        return results
+
+    def _initialize_worker_count(self, max_workers: int, data: List[Any]) -> int:
+        return min(max_workers or len(data), 10)
+
+    def _execute_with_options(self, item: Any, operation_name: str) -> Tuple[bool, Any, str]:
+        operation, options = self.operations[operation_name]
+        retries = options.get('retries', 1)
+        max_delay = options.get('max_delay', 3)
+
+        for attempt in range(retries):
+            delay = min(max_delay, (attempt + 1) ** 2)
+            success, result, error_msg = self._run_single_operation(item, operation)
+
+            if success:
+                return (True, item, result)
+            logging.error(f"Retrying {operation_name} for item {item}: {error_msg} (Attempt {attempt + 1}/{retries})")
+            time.sleep(delay)
+
+        return (False, item, f"Operation '{operation_name}' failed after {retries} attempts: {error_msg}")
+
+    def _run_single_operation(self, item: Any, operation: Callable[[Any], Any]) -> Tuple[bool, Any, str]:
+        try:
+            result = operation(item)
+            return (True, result, None)
+        except Exception as e:
+            return (False, None, f"Operation '{operation.__name__}' for item '{item}' failed due to: {str(e)}")
+
+    def _process_future_result(self, future, results: Dict[str, Any]):
+        try:
+            success, item, result = future.result()
+            if success:
+                results['successes'].append((item, result))
+            else:
+                results['errors'].append((item, result))
+        except Exception as e:
+            results['errors'].append((item, f"Unexpected Error while processing item '{item}': {str(e)}"))
+```
+
+## テスト方法
+1. **エラーハンドリングテスト**:
+   - 不正なデータ（例: `None`や非文字列）を提供し、期待されるエラーメッセージが正しく返されるか確認します。
+   - 正常系データに対して成功メッセージが返ることを確認します。
+
+2. **効率測定テスト**:
+   - 異なる`max_workers`での実行時間を計測し、処理性能を比較します。
+   - リソースの使用率を監視し、最適化された結果が得られているか確認します。
+
+3. **動的操作登録テスト**:
+   - 新しい操作（例えば`doubler`）を登録し、そのパフォーマンスと結果を確認します。
+
+4. **リトライ機能の検証**:
+   - `retries`と`max_delay`を異なる設定で実行し、適切に機能しているかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
