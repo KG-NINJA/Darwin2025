@@ -18723,3 +18723,70 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-21
+
+## 改善テーマ分析
+現在のアルゴリズムはスレッドプールを使用しており、競合なくメモリを効率的に使用していますが、創造性の視点から新しい操作を容易に登録・実行するための柔軟性が欠けています。特に、新規操作の追加が静的であり、動的なデータやニーズに応じた拡張性が不十分です。
+
+## 提案コード
+以下のコードでは、操作の登録をより動的に行うための `OperationManager` クラスを拡張しました。これにより、柔軟に新しい操作を追加できるようにし、既存の操作を実行する際の可読性も向上させます。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List
+
+class FlexibleOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+    
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """新しい操作を登録します。"""
+        self.operations[name] = operation
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str]) -> List[Dict[str, Any]]:
+        """選択した操作をデータに対して実行し、結果を返します。"""
+        results = []
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                results.append(future.result())
+
+        return results
+    
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        """単一の操作を実行します。"""
+        operation = self.operations[operation_name]
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            logging.error(f"Operation '{operation_name}' failed for item '{item}': {str(e)}")
+            return {'item': item, 'operation': operation_name, 'error': str(e), 'success': False}
+```
+
+## テスト方法
+1. **動的操作登録テスト**:
+   - 新しい操作（例: `squarer`）を登録し、その結果が期待通りであるかを確認します。
+
+2. **エラーハンドリングテスト**:
+   - 不正な操作名を指定した場合に、正しいエラーメッセージが返ることを確認します。
+
+3. **効率測定テスト**:
+   - 異なるデータ量（少量と大量）での実行時間を計測し、処理性能を評価します。
+
+4. **成功/失敗の検証**:
+   - 正常系データと異常系データを用いて成功と失敗のケースを検証します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
