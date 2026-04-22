@@ -18790,3 +18790,89 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-22
+
+## 改善テーマ分析
+現在の `FlexibleOperationManager` クラスは操作の登録や実行について柔軟性がありますが、以下の問題点があります：
+- エラーメッセージが一般的であり、具体的な問題を迅速に把握できない。
+- 複数の操作が失敗した場合の集約的なエラーハンドリングが欠けている。
+- 同時に実行できる操作の数を制限する際、最適化が不十分。
+
+これらの点を改善することで、より安定した動作を実現する必要があります。
+
+## 提案コード
+
+以下の改善提案では、エラーメッセージの強化、失敗の集約的処理、並列処理の最適化を行います。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List
+
+class FlexibleOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+    
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """新しい操作を登録します。"""
+        self.operations[name] = operation
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> List[Dict[str, Any]]:
+        """選択した操作をデータに対して実行し、結果を返します。"""
+        results = []
+        errors = []
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                result = future.result()
+                
+                if result['success']:
+                    results.append(result)
+                else:
+                    errors.append(result)
+        
+        if errors:
+            logging.error(f"Encountered errors during operation execution: {errors}")
+        
+        return results
+    
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        """単一の操作を実行します。"""
+        operation = self.operations.get(operation_name)
+        if operation is None:
+            error_msg = f"Operation '{operation_name}' not found."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            logging.error(f"Operation '{operation_name}' failed for item '{item}': {str(e)}")
+            return {'item': item, 'operation': operation_name, 'error': str(e), 'success': False}
+```
+
+## テスト方法
+1. **エラーハンドリングテスト**:
+   - 不正な操作名を指定した場合に、具体的なエラーメッセージが適切に返るか確認します（例: "Operation 'invalid' not found."）。
+  
+2. **集約的エラーハンドリングの検証**:
+   - 複数の操作が失敗した場合に、エラーログが正しく集約され、記録されているかを確認します。
+
+3. **効率測定テスト**:
+   - 異なる`max_workers`設定で実行し、スループットやレイテンシの変化を測定します。
+
+4. **並列処理の確認**:
+   - 正常系データを使って、操作の同時実行が意図通りに機能しているかを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
