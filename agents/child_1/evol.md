@@ -18970,3 +18970,103 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-24
+
+## 改善テーマ分析
+テーマ「効率」に基づき、`FlexibleOperationManager` クラスには以下の問題点があります：
+- 操作登録や実行時のパフォーマンスが最適化されていない。
+- エラー処理の際、特定の操作が失敗した場合にコストの高い再実行を伴う可能性がある。
+- 現在のスレッドの最大数管理や処理のやり取りが効率的でない。
+
+これらを改善することで、全体的な効率を向上させることが期待できます。
+
+## 提案コード
+以下の改善案では、操作登録を効率化し、エラーハンドリングを見直し、スレッド管理を最適化しています：
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List
+
+class FlexibleOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+    
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """新しい操作を登録します。"""
+        if name in self.operations:
+            logging.warning(f"Operation '{name}' is already registered. Overwriting.")
+        self.operations[name] = operation
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> List[Dict[str, Any]]:
+        """選択した操作をデータに対して実行し、結果を返します。"""
+        results = []
+        errors = []
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                result = future.result()
+                
+                if result['success']:
+                    results.append(result)
+                else:
+                    errors.append(result)
+
+        if errors:
+            self._handle_errors(errors)
+        
+        return results
+    
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        """単一の操作を実行します。"""
+        operation = self.operations.get(operation_name)
+        if operation is None:
+            error_msg = f"Operation '{operation_name}' not found."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            logging.error(f"Operation '{operation_name}' failed for item '{item}': {str(e)}")
+            return {'item': item, 'operation': operation_name, 'error': str(e), 'success': False}
+    
+    def _handle_errors(self, errors: List[Dict[str, Any]]) -> None:
+        """エラーを集約してログに記録します。"""
+        aggregated_errors = {error['operation']: [] for error in errors}
+        for error in errors:
+            aggregated_errors[error['operation']].append(error['item'])
+        
+        for operation, items in aggregated_errors.items():
+            logging.error(f"Operation '{operation}' failed for items: {items}")
+
+```
+
+## テスト方法
+1. **操作の重複登録テスト**:
+   - 同じ名前の操作を再登録した場合に、警告ログが出力されるか確認します。
+
+2. **エラーハンドリングテスト**:
+   - 不正な操作名を指定した場合に適切なエラーメッセージが返るか確認します。
+
+3. **集約的エラーハンドリングの検証**:
+   - 複数の操作が失敗した際、全ての失敗操作が集約され、ログに記録されることを確認します。
+
+4. **スレッド性能テスト**:
+   - `max_workers`の設定を変えて、処理速度やレイテンシが変化するかを測定します。
+
+5. **並列処理の確認**:
+   - 正常系データを使い、複数操作の同時実行が正しく機能しているか検証します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
