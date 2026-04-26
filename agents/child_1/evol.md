@@ -19163,3 +19163,82 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-26
+
+## 改善テーマ分析
+テーマ「拡張性」に関して、`FlexibleOperationManager` クラスには以下の問題点があります：
+
+- **気付け可能性の不足**: 新しい操作を追加する際、操作の登録方法が静的であるため、異なるデータ型や新しい機能に容易に対応できません。
+- **運用の煩雑化**: 現在の設計では、異なる操作を追加する際にコードが複雑になりがちで、メンテナンス性が低下しています。
+- **結果管理の課題**: 複数の操作の結果を効率的に集約・分析する手間がかかります。これにより、ユーザーエクスペリエンスが損なわれる可能性があります。
+
+これらの改善点を解消することで、操作の追加が容易になり、柔軟な拡張が可能になります。
+
+## 提案コード
+以下の改善案では、操作を登録する際の形式を簡素化し、結果管理を効率化するために、より抽象的な基盤を提供します。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List
+
+class FlexibleOperationManager:
+    def __init__(self):
+        # 操作を管理する辞書
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+        # 実行結果を保存するリスト
+        self.results: List[Dict[str, Any]] = []
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """新しい操作を登録します。"""
+        if name in self.operations:
+            logging.warning(f"Operation '{name}' is already registered. Overwriting.")
+        self.operations[name] = operation
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> None:
+        """選択した操作をデータに対して実行します。"""
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                result = future.result()
+                # 結果をリストに追加
+                self.results.append(result)
+
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        """単一の操作を実行します。"""
+        operation = self.operations.get(operation_name)
+        if operation is None:
+            error_msg = f"Operation '{operation_name}' not found for item '{item}'."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            logging.error(f"Operation '{operation_name}' failed for item '{item}': {str(e)}")
+            return {'item': item, 'operation': operation_name, 'error': f"Error: {str(e)} - Item: {item}", 'success': False}
+
+    def get_results(self) -> List[Dict[str, Any]]:
+        """保存された結果を取得します。"""
+        return self.results
+```
+
+## テスト方法
+1. **動的操作登録テスト**: 様々な操作を登録し、上書きされることを確認。
+2. **動的操作の実行テスト**: 異なるデータを用いて、選択した操作を並行実行し、全ての結果が正しく保存されているかを確認。
+3. **エラーメッセージの具体性**: 存在しない操作を指定し、エラーメッセージが適切に生成されるか確認。
+4. **結果取得テスト**: 結果が正確に格納され、`get_results`メソッドから正しいデータが取得できるか検証。
+
+この改善により、`FlexibleOperationManager` クラスの拡張性が向上し、新しい操作の追加及び管理がより容易になるでしょう。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
