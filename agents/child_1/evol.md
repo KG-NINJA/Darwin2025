@@ -19242,3 +19242,84 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-27
+
+## 改善テーマ分析
+テーマ「安定性」に関して、`FlexibleOperationManager` クラスには以下の問題点があります：
+
+- **例外処理の不十分**: 現在の実装では異常系に対する処理が不十分であり、エラーが発生するとプログラム全体が停止する可能性があります。
+- **結果管理の不安定性**: 関数の実行が失敗した場合、結果の整合性が失われることがあります。特に、エラーが発生した際の結果の保存方法に改善の余地があります。
+- **パフォーマンスの低下**: 大量のデータを処理する際、スレッド間の競合が発生する可能性があり、持続的なパフォーマンスが損なわれます。
+
+これらの問題を解決することで、システムの安定性向上に寄与し、より堅牢な実装が可能となります。
+
+## 提案コード
+以下の改善案では、例外処理を強化し、結果の管理方法を改善しています。また、スレッド間の競合を避けるために、スレッドセーフなリストを使用しています。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+from typing import Any, Callable, Dict, List
+
+class FlexibleOperationManager:
+    def __init__(self):
+        # 操作を管理する辞書
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+        # スレッドセーフな実行結果を保存するリスト
+        self.results: List[Dict[str, Any]] = []
+        self.lock = Lock()
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """新しい操作を登録します。"""
+        if name in self.operations:
+            logging.warning(f"Operation '{name}' is already registered. Overwriting.")
+        self.operations[name] = operation
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> None:
+        """選択した操作をデータに対して実行します。"""
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                result = future.result()
+                with self.lock:
+                    # 結果をリストに追加
+                    self.results.append(result)
+
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        """単一の操作を実行します。"""
+        operation = self.operations.get(operation_name)
+        if operation is None:
+            error_msg = f"Operation '{operation_name}' not found for item '{item}'."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            logging.error(f"Operation '{operation_name}' failed for item '{item}': {str(e)}")
+            return {'item': item, 'operation': operation_name, 'error': f"Error: {str(e)} - Item: {item}", 'success': False}
+
+    def get_results(self) -> List[Dict[str, Any]]:
+        """保存された結果を取得します。"""
+        with self.lock:
+            return self.results
+```
+
+## テスト方法
+1. **例外処理テスト**: 存在しない操作を指定し、正しくエラーメッセージが生成されるか確認。
+2. **スレッドセーフ性テスト**: 複数のスレッドが同時にデータを処理する状況を再現し、結果が正しく集約されるか検証。
+3. **結果整合性テスト**: 操作が成功した時と失敗した時の結果が適切にリストに保存されるか確かめる。
+4. **パフォーマンステスト**: 大量のデータでの処理時に、処理速度と例外率を測定し、安定性を評価。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
