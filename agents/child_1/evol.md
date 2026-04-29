@@ -19409,3 +19409,98 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-04-29
+
+## 改善テーマ分析
+現在の`FlexibleOperationManager`クラスにおいて、以下の問題点を特定しました：
+
+- **処理の透明性**: ユーザーが現在の処理の進行状況をリアルタイムで理解できるようにする必要があります。タスクの進捗表示機能を追加することで、ユーザーがどのタスクが実行中・完了しているかを簡単に把握できるようにします。
+- **エラーハンドリングの向上**: 現状のエラーメッセージは状況を伝えないことが多いため、より詳細なエラー情報を提供し、ユーザーが問題を容易に特定できるようにすることが求められます。
+- **処理の最適化**: 同時に実行されるタスク数が多い場合のパフォーマンスを改善するため、非同期処理の最適化を考慮します。特に、タスクが失敗した場合でも他のタスクには影響が及ばないようにする必要があります。
+
+## 提案コード
+以下は、`FlexibleOperationManager`クラスの改善案です。処理進捗表示機能を追加し、エラーメッセージの詳細を充実させ、全体的なパフォーマンスを最適化しました。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+from typing import Any, Callable, Dict, List
+
+class FlexibleOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+        self.results: List[Dict[str, Any]] = []
+        self.lock = Lock()
+        self.current_progress: Dict[str, int] = {}  # Track progress of operations
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any]) -> None:
+        """新しい操作を登録します。"""
+        if name in self.operations:
+            logging.warning(f"Operation '{name}' already registered. Overwriting.")
+        self.operations[name] = operation
+        self._visualize_operations()
+
+    def _visualize_operations(self) -> None:
+        """現在登録されている操作を視覚化します。"""
+        logging.info(f"現在の登録操作: {list(self.operations.keys())}")
+
+    def suggest_operations(self, input_name: str) -> List[str]:
+        """類似の操作名の提案を返します。"""
+        return [name for name in self.operations if input_name in name]
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> None:
+        """選択した操作をデータに対して実行します。"""
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                result = future.result()
+                with self.lock:
+                    self.results.append(result)
+                    self._update_progress(op_name)
+
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        operation = self.operations.get(operation_name)
+        if operation is None:
+            error_msg = f"Operation '{operation_name}' not found for item '{item}'."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            logging.error(f"Operation '{operation_name}' failed for item '{item}': {str(e)}")
+            return {'item': item, 'operation': operation_name, 'error': f"Error: {str(e)} - Item: {item}", 'success': False}
+
+    def _update_progress(self, operation_name: str) -> None:
+        """操作の進捗を更新します。"""
+        if operation_name not in self.current_progress:
+            self.current_progress[operation_name] = 0
+        self.current_progress[operation_name] += 1
+        logging.info(f"進捗更新: {operation_name} - 完了数: {self.current_progress[operation_name]}")
+
+    def get_results(self) -> List[Dict[str, Any]]:
+        """保存された結果を取得します。"""
+        with self.lock:
+            return self.results
+```
+
+## テスト方法
+1. **進捗更新テスト**: 複数の操作を同時に実行し、各操作の進捗が正しく記録されるか確認します。
+2. **エラーハンドリングテスト**: 故意にエラーを引き起こし、詳細なエラーメッセージが生成されるか検証します。
+3. **ユニットテスト**: 提案された操作名の提案機能および視覚化機能が期待通りに動作するかをシナリオベースで評価します。
+4. **パフォーマンステスト**: 同時実行タスクの数を増やしてもシステムがスムーズに動作するかを測定します。
+
+これにより、ユーザーにとっての直感的な操作体験が向上し、システム全体のパフォーマンスが改善されることを目指します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
