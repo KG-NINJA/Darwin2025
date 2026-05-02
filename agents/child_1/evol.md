@@ -19710,3 +19710,114 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-05-02
+
+## 改善テーマ分析
+`FlexibleOperationManager`クラスの現在の実装は、操作の動的登録や実行が可能ですが、以下の問題点が見られます：
+- **依存関係の管理不足**: 操作間の依存関係を管理できず、ルールにより組み合わせが制限される。
+- **エラー処理の一貫性**: エラーハンドリングが個々の操作に依存しており、一貫したフィードバックが得られない。
+- **再利用性の低さ**: 繰り返し使用可能なコンポーネントを利用していないため、新たな操作の追加が手間に感じられる。
+
+これらの点を考慮し、拡張性をさらに向上させるための改善案を提案します。
+
+## 提案コード
+以下のようなコードを適用することで、拡張性の高い構造へと変化させます。具体的には、操作の依存関係を管理し、共通のエラーハンドリングロジックを導入します。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+from typing import Any, Callable, Dict, List, Tuple
+
+class FlexibleOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Callable[[Any], Any]] = {}
+        self.results: List[Dict[str, Any]] = []
+        self.lock = Lock()
+        self.current_progress: Dict[str, int] = {}
+        self.dependencies: Dict[str, List[str]] = {}
+
+    def register_operation(self, name: str, operation: Callable[[Any], Any], dependencies: List[str] = []) -> None:
+        """新しい操作を登録し、依存関係を設定します。"""
+        if name in self.operations:
+            logging.warning(f"Operation '{name}' is already registered. Overwriting.")
+        self.operations[name] = operation
+        self.dependencies[name] = dependencies
+        self._visualize_operations()
+
+    def _visualize_operations(self) -> None:
+        """登録されている操作を視覚化します。"""
+        logging.info(f"現在の登録操作: {list(self.operations.keys())}")
+
+    def dynamic_run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> None:
+        """選択した操作をデータに対して実行します。依存関係を考慮します。"""
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self._execute_operation, item, op_name): (item, op_name) 
+                       for item in data for op_name in chosen_operations if op_name in self.operations}
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                result = future.result()
+                with self.lock:
+                    self.results.append(result)
+                    self._update_progress(op_name)
+
+    def _execute_operation(self, item: Any, operation_name: str) -> Dict[str, Any]:
+        """選択された操作を実行します。"""
+        if not self._check_dependencies(operation_name):
+            error_msg = f"Operation '{operation_name}' cannot be executed due to unmet dependencies."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+
+        operation = self.operations.get(operation_name)
+        if operation is None:
+            error_msg = f"Operation '{operation_name}' not found for item '{item}'."
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': error_msg, 'success': False}
+
+        try:
+            result = operation(item)
+            return {'item': item, 'operation': operation_name, 'result': result, 'success': True}
+        except Exception as e:
+            error_msg = f"Operation '{operation_name}' failed for item '{item}': {str(e)}"
+            logging.error(error_msg)
+            return {'item': item, 'operation': operation_name, 'error': f"Error: {str(e)} - Item: {item}", 'success': False}
+
+    def _check_dependencies(self, operation_name: str) -> bool:
+        """依存関係をチェックします。"""
+        required_deps = self.dependencies.get(operation_name, [])
+        for dep in required_deps:
+            if dep not in self.current_progress or self.current_progress[dep] == 0:
+                return False
+        return True
+
+    def _update_progress(self, operation_name: str) -> None:
+        """操作の進捗を更新します。"""
+        if operation_name not in self.current_progress:
+            self.current_progress[operation_name] = 0
+        self.current_progress[operation_name] += 1
+        logging.info(f"進捗更新: {operation_name} - 完了数: {self.current_progress[operation_name]}")
+
+    def visualize_progress(self) -> None:
+        """進捗を可視化する機能を追加します。"""
+        total_operations = sum(self.current_progress.values())
+        logging.info(f"全操作の進捗: {total_operations} / {len(self.operations)}")
+```
+
+## テスト方法
+1. **依存関係のテスト**: 新たに登録した操作が依存する操作が完了した場合のみ、実行されることを確認します。
+   
+2. **エラー処理テスト**: 依存関係が満たされていない操作を実行し、適切なエラーメッセージがログに出力されるか検証します。
+
+3. **拡張性テスト**: 新しい操作を依存関係とともに登録し、他の操作と協調動作するか確認します。
+
+4. **パフォーマンステスト**: 同時に数多くの依存関係を持つ操作を登録し、スムーズに動作するか評価します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
