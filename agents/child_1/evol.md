@@ -20190,3 +20190,96 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-05-08
+
+## 改善テーマ分析
+現在のコードは以下の問題を抱えています：
+- **依存関係チェックの冗長性**: 依存関係のチェックが非常に単純化されており、拡張が容易ではありません。このため、将来的な操作の追加や変更が困難です。
+- **エラーハンドリングの不統一**: エラー処理が一貫しておらず、特定のエラーに対して反応が異なるため、デバッグが難しい。
+- **進捗の視覚化**: 進捗状況の可視化が不充分で、詳細な情報を与えていないため、ユーザーが状況を把握しづらい。
+
+これらの状況を改善し、安定性を向上させることで、より堅牢でメンテナンスしやすいコードを目指します。
+
+## 提案コード
+以下のコードでは、依存関係のチェックをモジュラーにし、エラーハンドリングを統一化しました。また、進捗の視覚化を強化し、トラッキング情報がより詳細に記録されるようにします。
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Any, Dict, Callable
+import logging
+import threading
+
+class OperationManager:
+    def __init__(self):
+        self.results = []
+        self.lock = threading.Lock()
+        self.operations = {}  # ここでオペレーションを設定
+        self.dependency_map = {}  # 各オペレーションの依存関係を追加
+
+    def run_operations(self, data: List[Any], chosen_operations: List[str], max_workers: int = 10) -> None:
+        """選択した操作をデータに対して実行します。"""
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._execute_operation, item, op_name): (item, op_name)
+                for item in data
+                for op_name in chosen_operations 
+                if self._check_dependencies(op_name)
+            }
+
+            for future in as_completed(futures):
+                item, op_name = futures[future]
+                self._handle_future_result(item, op_name, future)
+
+        self._visualize_progress()
+
+    def _handle_future_result(self, item: Any, op_name: str, future) -> None:
+        """Futureの結果を処理し、進捗を更新します。"""
+        try:
+            result = future.result()
+            self._handle_result(item, op_name, result)
+        except Exception as e:
+            logging.error(f"エラー発生: '{str(e)}' - '{op_name}' に対して '{item}'")
+
+    def _handle_result(self, item: Any, op_name: str, result: Dict[str, Any]) -> None:
+        """結果を処理し、進捗を更新します。"""
+        if result.get('success', False):
+            with self.lock:
+                self.results.append(result)
+                self._update_progress(op_name)
+        else:
+            logging.error(f"オペレーション失敗: '{op_name}' とアイテム: '{item}' - エラー: {result.get('error')}")
+
+    def _visualize_progress(self) -> None:
+        """進捗を視覚的に表示します。"""
+        total_operations = len(self.results)
+        total_operations_count = len(self.operations)
+        percentage_complete = (total_operations / total_operations_count * 100) if total_operations_count else 0
+        logging.info(f"進捗状況: {total_operations} / {total_operations_count} - 完了率: {percentage_complete:.2f}%")
+
+    def _check_dependencies(self, op_name: str) -> bool:
+        """依存関係をチェックする機能を追加します。"""
+        dependencies = self.dependency_map.get(op_name, [])
+        return all(dep in self.results for dep in dependencies)
+
+    def add_operation(self, op_name: str, func: Callable, dependencies: List[str] = None) -> None:
+        """新しいオペレーションを追加します。"""
+        self.operations[op_name] = func
+        if dependencies is None:
+            dependencies = []
+        self.dependency_map[op_name] = dependencies
+```
+
+## テスト方法
+1. **依存関係テスト**: `add_operation`メソッドを呼び出し、依存関係が正しく設定されていることを確認します。未完了の依存操作がある場合、該当する操作が実行されないことをテストします。
+2. **エラーハンドリングテスト**: `run_operations`メソッドで意図的にエラーを発生させて、適切なエラーログが生成されるか確認します。
+3. **進捗可視化**: `_visualize_progress`メソッドを呼び出し、進捗情報が正確にログに表示されるか確認します。特に完了率が適切かをテストします。
+4. **負荷テスト**: 多数のデータ項目に対して複数操作を実行し、結果が成功するかを確認しつつ、全体の競合が発生しないことを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
