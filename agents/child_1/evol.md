@@ -21445,3 +21445,82 @@ class FlexibleOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-05-22
+
+## 改善テーマ分析
+現在のアルゴリズムは、オペレーションの柔軟性向上に成功していますが、依存関係の管理やエラーハンドリングにおける安定性が不足しています。特に、多くのオペレーションが同時に実行されると、結果が意図せぬ方法で相互作用する可能性があります。これを解決するためには、より堅牢な依存関係チェックや、エラーへの回復力を高める必要があります。
+
+## 提案コード
+以下は、安定性を向上させるための改善案です。`run_operations`メソッドを改良し、各オペレーションの実行後にエラーチェックを行うことで、エラー対策を徹底します。
+
+```python
+import logging
+import threading
+from typing import Any, Callable, Dict, List, Optional
+
+class StableOperationManager:
+    def __init__(self):
+        self.operations: Dict[str, Dict[str, Any]] = {}
+        self.results: List[Any] = []
+        self.error_messages: List[str] = []
+        self.lock = threading.Lock()
+        self.thread_limit: int = 5  # 同時スレッド数
+
+    def add_operation(self, op_name: str, func: Callable, dependencies: Optional[List[str]] = None) -> None:
+        if op_name not in self.operations:
+            self.operations[op_name] = {
+                "func": func,
+                "dependencies": dependencies or []
+            }
+        else:
+            logging.warning(f"Operation '{op_name}' already exists.")
+
+    def run_operations(self):
+        while self.operations:
+            threads = []
+            for op_name in list(self.operations.keys()):
+                if self._check_dependencies(op_name) and len(threads) < self.thread_limit:
+                    thread = threading.Thread(target=self._execute_operation, args=(op_name,))
+                    threads.append(thread)
+                    thread.start()
+                    del self.operations[op_name]
+            
+            for thread in threads:
+                thread.join()
+
+    def _execute_operation(self, op_name: str):
+        operation = self.operations.get(op_name)
+        try:
+            result = operation["func"]()
+            self._update_success(op_name, result)
+        except Exception as e:
+            self._log_error(op_name, str(e))
+
+    def _update_success(self, op_name: str, result: Any) -> None:
+        with self.lock:
+            self.results.append(result)
+            logging.info(f"Operation '{op_name}' completed successfully.")
+
+    def _log_error(self, op_name: str, error: str) -> None:
+        with self.lock:
+            logging.error(f"Error: '{error}' - Operation: '{op_name}'")
+            self.error_messages.append(f"Operation: '{op_name}', Error: '{error}'")
+
+    def _check_dependencies(self, op_name: str) -> bool:
+        return all(dep in self.results for dep in self.operations[op_name]["dependencies"])
+```
+
+## テスト方法
+1. **依存関係チェックテスト**: 各オペレーションの実行前に依存関係が正しく評価され、未完了の依存関係がある場合は実行されないことを確認。
+2. **スレッドセーフテスト**: `results`や`error_messages`への書き込み時に競合が発生しないことを確認（複数スレッドで同時に実行）。
+3. **エラーハンドリングテスト**: 故意にエラーを発生させ、すべてのエラーが正しくログに記録され、結果リストに影響を与えないことを確認。
+4. **進捗管理テスト**: 各オペレーションの完了状況が正しく記録され、表示されることを確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
