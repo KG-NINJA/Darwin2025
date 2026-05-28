@@ -21989,3 +21989,105 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-05-28
+
+## 改善テーマ分析
+「安定性」に基づいて、`DynamicOperationManager`クラスに以下の問題点があります：
+
+- **エラーハンドリングの一貫性**: エラー状態の管理が不完全で、操作間での影響を考慮していない。
+- **競合状態のリスク**: スレッド間でのロック管理が不十分であり、資源の整合性が危うい。特に、複数スレッドで同時に`results`や`error_messages`に書き込む状況が問題。
+
+これらの問題を解決することが、コードの安定性向上につながると考えます。
+
+## 提案コード
+以下に示す提案コードは、エラーハンドリングを強化し、競合状態を防ぐための機構を導入しています。
+
+```python
+import logging
+import threading
+from typing import Any, Callable, Dict, List, Optional
+
+class EnhancedOperationManager:
+    def __init__(self, thread_limit: int = 5, retry_limit: int = 3):
+        self.operations: Dict[str, Dict[str, Any]] = {}
+        self.results: List[Any] = []
+        self.error_messages: List[str] = []
+        self.lock = threading.Lock()
+        self.thread_limit = thread_limit
+        self.retry_limit = retry_limit
+        self.failed_operations: List[str] = []
+
+    def add_operation(self, op_name: str, func: Callable, dependencies: Optional[List[str]] = None) -> None:
+        if op_name not in self.operations:
+            self.operations[op_name] = {
+                "func": func,
+                "dependencies": dependencies or [],
+                "is_completed": False,
+                "retry_attempts": 0,
+            }
+        else:
+            logging.warning(f"Operation '{op_name}' already exists.")
+
+    def set_dependencies(self, op_name: str, dependencies: List[str]) -> None:
+        if op_name in self.operations:
+            self.operations[op_name]['dependencies'] = dependencies
+        else:
+            logging.error(f"Operation '{op_name}' does not exist.")
+
+    def run_operations(self):
+        while self.operations:
+            threads = []
+            for op_name in list(self.operations.keys()):
+                if self._are_dependencies_met(op_name) and len(threads) < self.thread_limit:
+                    thread = threading.Thread(target=self._execute_with_retry, args=(op_name,))
+                    threads.append(thread)
+                    thread.start()
+                    del self.operations[op_name]
+
+            for thread in threads:
+                thread.join()
+
+    def _execute_with_retry(self, op_name: str):
+        operation = self.operations[op_name]
+        while operation['retry_attempts'] < self.retry_limit:
+            try:
+                result = operation["func"]()
+                self._record_success(op_name, result)
+                break
+            except Exception as e:
+                self._log_error(op_name, str(e))
+                operation['retry_attempts'] += 1
+                if operation['retry_attempts'] >= self.retry_limit:
+                    self.failed_operations.append(op_name)
+                    logging.error(f"Failed '{op_name}' after {self.retry_limit} attempts.")
+
+    def _record_success(self, op_name: str, result: Any) -> None:
+        with self.lock:
+            self.results.append(result)
+            self.operations[op_name]['is_completed'] = True
+            logging.info(f"Operation '{op_name}' completed successfully.")
+
+    def _log_error(self, op_name: str, error: str) -> None:
+        with self.lock:
+            logging.error(f"Error: '{error}' - Operation: '{op_name}'")
+            self.error_messages.append(f"Operation: '{op_name}', Error: '{error}'")
+
+    def _are_dependencies_met(self, op_name: str) -> bool:
+        return all(dep in self.results for dep in self.operations[op_name]["dependencies"])
+```
+
+## テスト方法
+1. **依存関係テスト**: `set_dependencies`メソッドを用いて設定された依存関係が正しく評価され、操作が適切に実行されるか確認。
+2. **エラーハンドリングテスト**: 故意にエラーを発生させ、エラーログが要求通りに記録されるか確認。
+3. **再試行確認テスト**: エラー発生時に再試行が行われ、操作の成功または失敗が正確に更新されるか確認。
+4. **競合状態テスト**: 同時に`results`や`error_messages`への書き込みが適切に管理されることを確認。
+5. **失敗操作識別テスト**: 最大再試行回数に達した場合、`failed_operations`リストに正しく追加されるか確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
