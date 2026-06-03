@@ -1,9 +1,3 @@
-import threading
-import logging
-from time import sleep
-from datetime import datetime
-from typing import Callable, Dict, List, Any, Optional
-
 class EnhancedOperationManager:
     def __init__(self, thread_limit: int = 5, retry_limit: int = 3, retry_interval: float = 1.0):
         self.operations: Dict[str, Dict[str, Any]] = {}
@@ -51,15 +45,15 @@ class EnhancedOperationManager:
     def _execute_with_retry(self, op_name: str):
         """リトライ機能を付加してオペレーションを実行します。"""
         operation = self.operations[op_name]
-        while operation['retry_attempts'] < self.retry_limit:
+        for attempt in range(operation['retry_attempts'], self.retry_limit):
             try:
                 result = operation["func"]()
                 self._record_success(op_name, result)
                 break
             except Exception as e:
-                self._log_error(op_name, str(e))
-                operation['retry_attempts'] += 1
+                self._log_error(op_name, str(e), attempt)
                 sleep(self.retry_interval)  # リトライ間隔を導入
+                operation['retry_attempts'] += 1
                 if operation['retry_attempts'] >= self.retry_limit:
                     self.failed_operations.append(op_name)
                     logging.error(f"Failed '{op_name}' after {self.retry_limit} attempts.")
@@ -72,12 +66,12 @@ class EnhancedOperationManager:
             self.operations[op_name]['is_completed'] = True
             logging.info(f"Operation '{op_name}' completed successfully at {timestamp}.")
 
-    def _log_error(self, op_name: str, error: str) -> None:
+    def _log_error(self, op_name: str, error: str, attempt: int) -> None:
         """エラーメッセージを記録します。"""
         with self.lock:
             timestamp = datetime.now().isoformat()
-            logging.error(f"Error in '{op_name}' at {timestamp}: {error}")
-            self.error_messages.append(f"Operation: '{op_name}', Error: '{error}' at {timestamp}")
+            logging.error(f"Error in '{op_name}' at {timestamp} (Attempt {attempt + 1}): {error}")
+            self.error_messages.append(f"Operation: '{op_name}', Attempt: {attempt + 1}, Error: '{error}' at {timestamp}")
 
     def _are_dependencies_met(self, op_name: str) -> bool:
         """依存関係が満たされているかを評価します。"""
