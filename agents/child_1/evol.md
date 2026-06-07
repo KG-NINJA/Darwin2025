@@ -23133,3 +23133,122 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-06-07
+
+## 改善テーマ分析
+現在のコードはスレッドを利用したオペレーションの管理を行っていますが、以下の問題点があります：
+- **スレッド管理**: `run_operations`内でのスレッドの終了確認が非効率的で、スレッド数が多い場合にパフォーマンスの低下を引き起こす可能性がある。
+- **リトライロジック**: リトライ回数が常に上限に達するまで続き、エラーハンドリングが不十分。リトライの戦略に関して柔軟性がありません。
+- **依存関係評価**: 依存関係の評価がパフォーマンスに影響を及ぼす可能性があります。特に、多量の操作がある場合、全体の処理に遅延が生じる。
+
+テーマ「安定性」を基に、これらの問題を改善しつつ、スレッド管理とリトライ方法の最適化を図ります。
+
+## 提案コード
+以下のコードは、オペレーションのスレッド管理を改善し、リトライ戦略を強化したバージョンです。
+
+```python
+import logging
+from datetime import datetime
+from threading import Thread, Lock
+from time import sleep
+from typing import Callable, Any, List, Optional
+
+class OperationManager:
+    def __init__(self, thread_limit: int, retry_limit: int, retry_interval: float):
+        self.operations = {}
+        self.results = []
+        self.error_messages = []
+        self.lock = Lock()
+        self.thread_limit = thread_limit
+        self.retry_limit = retry_limit
+        self.retry_interval = retry_interval
+        self.failed_operations = []
+
+    def add_operation(self, op_name: str, func: Callable[..., Any], dependencies: Optional[List[str]] = None) -> None:
+        """オペレーションを追加します。"""
+        if op_name in self.operations:
+            logging.warning(f"Operation '{op_name}' already exists.")
+            return
+        self.operations[op_name] = {
+            "func": func,
+            "dependencies": dependencies or [],
+            "is_completed": False,
+            "retry_attempts": 0,
+        }
+
+    def run_operations(self) -> None:
+        """オペレーションを実行します。"""
+        while self.operations:
+            threads_active = [t for t in self.thread_pool if t.is_alive()]
+            active_threads = len(threads_active)
+
+            for op_name in list(self.operations.keys()):
+                if self._are_dependencies_met(op_name) and active_threads < self.thread_limit:
+                    thread = Thread(target=self._execute_with_retry, args=(op_name,))
+                    thread.start()
+                    self.thread_pool.append(thread)
+                    active_threads += 1
+
+            self._cleanup_operations()
+            # Join only those threads that have completed
+            for thread in threads_active:
+                thread.join()
+
+    def _execute_with_retry(self, op_name: str) -> None:
+        """リトライ機能を付加してオペレーションを実行します。"""
+        operation = self.operations[op_name]
+        while operation['retry_attempts'] < self.retry_limit:
+            try:
+                result = operation["func"]()
+                self._record_success(op_name, result)
+                break
+            except Exception as e:
+                self._handle_error(op_name, str(e), operation['retry_attempts'])
+                sleep(self.retry_interval)
+                operation['retry_attempts'] += 1
+        else:
+            self.failed_operations.append(op_name)
+            logging.error(f"Operation '{op_name}' failed after {self.retry_limit} attempts.")
+
+    def _record_success(self, op_name: str, result: Any) -> None:
+        """成功したオペレーションを記録します。"""
+        with self.lock:
+            timestamp = datetime.now().isoformat()
+            self.results.append({"op_name": op_name, "result": result, "timestamp": timestamp})
+            self.operations[op_name]['is_completed'] = True
+            logging.info(f"Operation '{op_name}' completed successfully at {timestamp}.")
+
+    def _handle_error(self, op_name: str, error: str, attempt: int) -> None:
+        """エラーメッセージを記録し、ロギングします。"""
+        with self.lock:
+            timestamp = datetime.now().isoformat()
+            logging.error(f"Error in '{op_name}' at {timestamp} (Attempt {attempt + 1}): {error}")
+            self.error_messages.append(f"Operation: '{op_name}', Attempt: {attempt + 1}, Error: '{error}' at {timestamp}")
+
+    def _are_dependencies_met(self, op_name: str) -> bool:
+        """依存関係が満たされているかを評価します。"""
+        return all(dep in [result["op_name"] for result in self.results] for dep in self.operations[op_name]["dependencies"])
+
+    def _cleanup_operations(self) -> None:
+        """冗長な操作情報をクリアします。"""
+        with self.lock:
+            self.operations = {k: v for k, v in self.operations.items() if not v['is_completed']}
+```
+
+## テスト方法
+1. **スレッドのリサイクルテスト**: `run_operations`メソッドを実行し、最大スレッド数が適切に管理されるかを確認。アクティブスレッドの数をアサーションで検証。
+2. **リトライの間隔テスト**: 故意にエラーを発生させ、リトライが指定されたインターバルで行われるかを確認。各試行が期待どおりの間隔で行われることをタイマーで確認する。
+3. **依存関係の評価テスト**: 依存関係を持つオペレーションについて、正しく実行されるか確認する。期待したオペレーションが実行されたことをアサーションで確認。
+4. **エラーハンドリングテスト**: 故意にエラーを発生させ、そのエラーログが適切に記録されることを確認。エラーメッセージが期待通りに記録されているか確認。
+5. **完了状況確認テスト**: 完了したオペレーションが`results`リストに正確に記録されていることを確認。アサーションで期待されるデータが蓄積されているかを確認。 
+
+これにより、安定性の向上とともに、可用性が増し、メンテナンスが容易になります。次ステップとして、テストの実行を進めてください。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
