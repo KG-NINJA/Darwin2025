@@ -23609,3 +23609,135 @@ class OperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-06-11
+
+## 改善テーマ分析
+現在のコードは、スレッドプール内でのオペレーション管理とリトライの機能を持っていますが、拡張性の観点からは以下の問題があります：
+
+- **依存関係の追加が困難**: 新しい依存関係を追加する際に、`add_operation`メソッドを通じて手動で追加する必要があります。このフローは不足していて、新しいオペレーションが互いに依存する場合の構造が明確でない。
+- **エラーハンドリングの統一性がない**: 各操作のエラーハンドリングが個別に定義されており、拡張する際に複製が発生しやすい。
+- **動的なスレッド管理が弱い**: スレッドの動的管理が限られており、オペレーションが完了してからスレッドを解放するのではなく、新しいオペレーションの実行が一時的に制限される。
+
+## 提案コード
+これらの問題を解決するために、以下の改善策を提案します：
+
+1. **依存関係の階層を明確化**: オペレーション追加時に、依存関係の明示的な管理をサポートするクラスを作成。
+2. **統一されたエラーハンドリング**: エラーを共通のメソッドで処理し、オペレーションの戻り値に基づいて動的にエラーハンドリングを変更。
+
+以下は、改善されたPythonコードの例です：
+
+```python
+from threading import Thread, Lock
+from typing import Callable, Any, List, Dict, Optional
+from datetime import datetime
+from time import sleep
+import logging
+
+
+class OperationManager:
+    def __init__(self, thread_limit: int = 10, retry_limit: int = 3, retry_interval: float = 1.0) -> None:
+        self.operations: Dict[str, Dict[str, Any]] = {}
+        self.results: Dict[str, Any] = {}
+        self.lock = Lock()
+        self.thread_limit = thread_limit
+        self.retry_limit = retry_limit
+        self.retry_interval = retry_interval
+        self.failed_operations: List[str] = []
+        self.thread_pool: List[Thread] = []
+
+    def add_operation(self, op_name: str, func: Callable[..., Any], dependencies: Optional[List[str]] = None) -> None:
+        """オペレーションを追加します。"""
+        if op_name in self.operations:
+            logging.warning(f"Operation '{op_name}' already exists.")
+            return
+        self.operations[op_name] = {
+            "func": func,
+            "dependencies": dependencies or [],
+            "is_completed": False,
+            "retry_attempts": 0,
+        }
+
+    def run_operations(self) -> None:
+        """オペレーションを実行します。"""
+        while self.operations:
+            self._execute_ready_operations()
+            self._cleanup_operations()
+            self._join_completed_threads()
+
+    def _execute_ready_operations(self) -> None:
+        """依存関係が満たされているオペレーションを実行します。"""
+        active_threads = len(self.thread_pool)
+        for op_name in list(self.operations.keys()):
+            if self._are_dependencies_met(op_name) and active_threads < self.thread_limit:
+                thread = Thread(target=self._execute_with_retry, args=(op_name,))
+                thread.start()
+                self.thread_pool.append(thread)
+                active_threads += 1
+
+    def _execute_with_retry(self, op_name: str) -> None:
+        """リトライ機能を付加してオペレーションを実行します。"""
+        operation = self.operations[op_name]
+        while operation['retry_attempts'] < self.retry_limit:
+            try:
+                result = operation['func']()
+                self._record_success(op_name, result)
+                return
+            except Exception as e:
+                self._handle_error(op_name, str(e))
+                sleep(self.retry_interval)
+                operation['retry_attempts'] += 1
+
+        self.failed_operations.append(op_name)
+        logging.error(f"Operation '{op_name}' failed after {self.retry_limit} attempts.")
+
+    def _record_success(self, op_name: str, result: Any) -> None:
+        """成功したオペレーションを記録します。"""
+        with self.lock:
+            timestamp = datetime.now().isoformat()
+            self.results[op_name] = {"result": result, "timestamp": timestamp}
+            self.operations[op_name]['is_completed'] = True
+            logging.info(f"Operation '{op_name}' completed successfully at {timestamp}.")
+
+    def _handle_error(self, op_name: str, error: str) -> None:
+        """エラーメッセージを記録し、ロギングします。"""
+        with self.lock:
+            timestamp = datetime.now().isoformat()
+            error_message = (f"Operation: '{op_name}', "
+                             f"Attempt: {self.operations[op_name]['retry_attempts'] + 1}, "
+                             f"Error: '{error}' at {timestamp}")
+            logging.error(error_message)
+
+    def _are_dependencies_met(self, op_name: str) -> bool:
+        """依存関係が満たされているかを評価します。"""
+        return all(dep in self.results for dep in self.operations[op_name]["dependencies"])
+
+    def _cleanup_operations(self) -> None:
+        """冗長な操作情報をクリアします。"""
+        with self.lock:
+            self.operations = {k: v for k, v in self.operations.items() if not v['is_completed']}
+
+    def _join_completed_threads(self) -> None:
+        """完了したスレッドを結合します。"""
+        for thread in list(self.thread_pool):
+            if not thread.is_alive():
+                thread.join()
+                self.thread_pool.remove(thread)
+```
+
+## テスト方法
+1. **スレッドのリサイクルテスト**: `run_operations`メソッドを実行し、スレッドプール内のスレッド数を確認。すべてのスレッドが適切に完了したか、ロギングで確認。
+2. **リトライの間隔テスト**: 故意にエラーを発生させて、リトライが指定したインターバルで行われるかを検証。
+3. **依存関係の評価テスト**: 手動で依存関係があるオペレーションを作り、期待通りの順序で実行されるかを確認。
+4. **エラーハンドリングテスト**: 故意にエラーを発生させ、エラーメッセージが正しく記録されていることを確認。
+5. **完了状況確認テスト**: 完了したオペレーションの結果が正しく記録されているかを確認するため、アサーションを使用。
+
+この改善が、拡張性と安定性の向上に寄与することを期待しています。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
