@@ -24674,3 +24674,133 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-06-20
+
+## 改善テーマ分析
+現在のコードは依存オペレーションを効率的に処理し、多重スレッドでの実行に対するリトライ機能が実装されていますが、以下の問題点があります：
+
+- **冗長なロギング**: 障害や成功の結果が多くロギングされるため、重要な情報が埋もれがち。
+- **エラーハンドリングの不足**: 失敗時のロギングがあるが、その後の処理が改善される余地がある。
+- **依存関係の可視化不足**: どのオペレーションがスキップされたかを視覚的に表現する方法が欠けている。
+- **リトライの戦略**: 常に同じ回数だけリトライを行うのではなく、動的な戦略を考慮することができる。
+
+## 提案コード
+以下の改善を含むコードの実装案を示します：
+
+```python
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Any, Optional, List
+import logging
+
+class OperationManager:
+    def __init__(self, thread_limit: int = 5, retry_limit: int = 3):
+        self.operations = {}
+        self.dependency_graph = {}
+        self.failed_operations = {}
+        self.results = {}
+        self.thread_limit = thread_limit
+        self.retry_limit = retry_limit
+
+    def add_operation(self, op_name: str, func: Callable[..., Any], dependencies: Optional[List[str]] = None) -> None:
+        if op_name in self.operations:
+            logging.warning(f"Operation '{op_name}' already exists.")
+            return
+        self.operations[op_name] = {
+            "func": func,
+            "dependencies": dependencies or [],
+            "is_completed": False,
+        }
+
+        if dependencies:
+            for dep in dependencies:
+                if dep not in self.dependency_graph:
+                    self.dependency_graph[dep] = []
+                self.dependency_graph[dep].append(op_name)
+
+    def run_operations(self) -> None:
+        order_of_execution = self._get_execution_order()
+        with ThreadPoolExecutor(max_workers=self.thread_limit) as executor:
+            future_to_op = {executor.submit(self._execute_with_retry, op_name): op_name for op_name in order_of_execution}
+
+            for future in as_completed(future_to_op):
+                op_name = future_to_op[future]
+                try:
+                    future.result()
+                except Exception:
+                    logging.error(f"Operation '{op_name}' failed.")
+                    self._log_failure_details(op_name)
+                    self._skip_dependencies(op_name)
+
+    def _get_execution_order(self) -> List[str]:
+        visited = set()
+        order = []
+
+        def visit(op_name: str):
+            if op_name not in visited:
+                visited.add(op_name)
+                for dep in self.operations[op_name]['dependencies']:
+                    visit(dep)
+                order.append(op_name)
+
+        for op_name in self.operations.keys():
+            visit(op_name)
+
+        return order
+
+    def _execute_with_retry(self, op_name: str) -> None:
+        operation = self.operations[op_name]
+        for attempt in range(self.retry_limit):
+            try:
+                result = operation['func']()
+                self._record_success(op_name, result)
+                return
+            except Exception as e:
+                self._handle_error(op_name, str(e), attempt + 1)
+                if attempt + 1 < self.retry_limit:
+                    logging.info(f"Retrying operation '{op_name}'...")
+
+        self.failed_operations[op_name] = self.retry_limit
+        logging.error(f"Operation '{op_name}' failed after {self.retry_limit} attempts.")
+
+    def _record_success(self, op_name: str, result: Any) -> None:
+        timestamp = datetime.now().isoformat()
+        self.results[op_name] = {"result": result, "timestamp": timestamp}
+        self.operations[op_name]['is_completed'] = True
+        logging.info(f"Operation '{op_name}' completed successfully at {timestamp}.")
+
+    def _handle_error(self, op_name: str, error: str, attempt: int) -> None:
+        timestamp = datetime.now().isoformat()
+        error_message = (f"Operation: '{op_name}', "
+                         f"Attempt: {attempt}, "
+                         f"Error: '{error}' at {timestamp}")
+        logging.error(error_message)
+
+    def _log_failure_details(self, op_name: str) -> None:
+        """
+        失敗したオペレーションの詳細を記録します。
+        """
+        logging.info(f"Failure details for operation '{op_name}': {self.operations[op_name]}")
+
+    def _skip_dependencies(self, op_name: str) -> None:
+        for dep in self.dependency_graph.get(op_name, []):
+            if dep in self.operations and not self.operations[dep]['is_completed']:
+                logging.info(f"Skipping dependent operation '{dep}' due to failure in '{op_name}'.")
+
+```
+
+## テスト方法
+1. **依存関係テスト**: 適切な依存関係を用意し、オペレーションの失敗時に依存オペレーションがスキップされることを確認。
+2. **スレッド管理検証**: いくつかのオペレーションを作成し、`run_operations`を使用してスレッド処理がスムーズに行われるかを確認。
+3. **リトライ機能テスト**: 意図的にエラーを発生させ、設定された回数のリトライが機能することを検証。
+4. **エラーロギング確認**: エラーメッセージが正確に記録されているか、また、スキップされた依存オペレーションもログに記録されているかを確認。
+5. **成功記録確認**: 成功時に正確な結果とタイムスタンプが記録されることを確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
