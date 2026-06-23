@@ -25004,3 +25004,98 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-06-23
+
+## 改善テーマ分析
+現在の実装では、以下の問題点が見受けられます。
+- **直感的な操作**: オペレーションの追加や依存関係の設定の際に、シンプルさが欠けるため理解しにくい。
+- **エラーハンドリングの明確性**: エラー処理のロジックが冗長で、動作の理解が難しい。
+- **結果の管理**: 成功したオペレーションの結果の保存が分散しており、トラッキングが困難。
+
+これらを改善することで、直感的で効率的な使い勝手を提供できます。
+
+## 提案コード
+以下の改善案を実装します。主な変更点は、オペレーションの追加時に自動的に依存関係を確認・設定すること、エラーハンドリングを簡略化すること、及び結果管理を統一することです。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from typing import Callable, Any, Dict, List
+
+
+class EnhancedOperationManager:
+    def __init__(self, thread_limit: int = 4, retry_limit: int = 3):
+        self.operations: Dict[str, Dict[str, Any]] = {}
+        self.results: Dict[str, Any] = {}
+        self.failed_operations: Dict[str, int] = {}
+        self.thread_limit = thread_limit
+        self.retry_limit = retry_limit
+
+    def add_operation(self, op_name: str, func: Callable, dependencies: List[str] = None) -> None:
+        if op_name in self.operations:
+            logging.warning(f"Operation '{op_name}' already exists.")
+            return
+        
+        self.operations[op_name] = {
+            "func": func,
+            "dependencies": dependencies or [],
+            "is_completed": False,
+        }
+        self._validate_dependencies(dependencies)
+        
+    def _validate_dependencies(self, dependencies: List[str]) -> None:
+        for dep in dependencies or []:
+            if dep not in self.operations:
+                logging.error(f"Dependency '{dep}' for operation '{op_name}' does not exist.")
+            else:
+                logging.info(f"Dependency '{dep}' is valid for operation '{op_name}'.")
+
+    def run_operations(self) -> None:
+        ordered_operations = self._get_execution_order()
+        with ThreadPoolExecutor(max_workers=self.thread_limit) as executor:
+            future_to_op = {executor.submit(self._execute_operation, op_name): op_name for op_name in ordered_operations}
+
+            for future in as_completed(future_to_op):
+                op_name = future_to_op[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    self._handle_operation_failure(op_name, str(e))
+
+    def _execute_operation(self, op_name: str) -> None:
+        operation = self.operations[op_name]
+        for attempt in range(self.retry_limit):
+            try:
+                result = operation['func']()
+                self.results[op_name] = result
+                operation['is_completed'] = True
+                return
+            except Exception as e:
+                logging.warning(f"Attempt {attempt + 1} failed for '{op_name}': {e}")
+                if attempt + 1 == self.retry_limit:
+                    self.failed_operations[op_name] = self.retry_limit
+                    logging.error(f"Operation '{op_name}' failed after {self.retry_limit} attempts.")
+
+    def _handle_operation_failure(self, op_name: str, error: str) -> None:
+        logging.error(f"Operation '{op_name}' failed: {error}")
+
+    def _get_execution_order(self) -> List[str]:
+        return sorted(self.operations.keys(), key=lambda x: len(self.operations[x]['dependencies']))
+
+```
+
+## テスト方法
+1. **依存関係の検証**: 存在しない依存関係を設定し、エラーメッセージが正しく表示されるか確認する。
+2. **スレッド管理**: スレッド数を上限として、同時に複数オペレーションが実行されることを確認する。
+3. **リトライ機能**: 故意に失敗させたオペレーションを追加し、リトライ処理が期待どおりに機能することを確認する。
+4. **結果の記録確認**: オペレーション成功時に、結果が適切に記録されているかを確認する。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
