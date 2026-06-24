@@ -25099,3 +25099,86 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-06-24
+
+## 改善テーマ分析
+現在のアルゴリズムには、以下の問題点が見受けられます。
+- **パフォーマンスの非効率性**: 同時に実行される操作が制限されているため、無駄に時間がかかる場合があります。
+- **エラーハンドリングの複雑さ**: エラー管理が冗長で理解しにくいため、デバッグが難航します。
+- **結果の一貫性の欠如**: 結果が分散して返されるため、トラッキングが煩雑で、状態管理が難しくなります。
+
+これらの問題を解決することで、効率的でスムーズな操作が可能となります。
+
+## 提案コード
+以下の改善案を実装します。主な変更点は、エラーハンドリングを統一化し、結果を一元管理することで、より効率的なオペレーションマネージャーを作成することです。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Any, Dict, List
+
+class EnhancedOperationManager:
+    def __init__(self, thread_limit: int = 4):
+        self.operations: Dict[str, Dict[str, Any]] = {}
+        self.results: Dict[str, Any] = {}
+        self.failed_operations: Dict[str, int] = {}
+        self.thread_limit = thread_limit
+
+    def add_operation(self, op_name: str, func: Callable, dependencies: List[str] = None) -> None:
+        if op_name in self.operations:
+            logging.warning(f"Operation '{op_name}' already exists.")
+            return
+        
+        self.operations[op_name] = {
+            "func": func,
+            "dependencies": dependencies or [],
+            "is_completed": False,
+        }
+        self._validate_dependencies(dependencies)
+
+    def _validate_dependencies(self, dependencies: List[str]) -> None:
+        for dep in dependencies or []:
+            if dep not in self.operations:
+                logging.error(f"Dependency '{dep}' for operation '{dep}' does not exist.")
+
+    def run_operations(self) -> None:
+        ordered_operations = self._get_execution_order()
+        with ThreadPoolExecutor(max_workers=self.thread_limit) as executor:
+            future_to_op = {executor.submit(self._execute_operation, op_name): op_name for op_name in ordered_operations}
+
+            for future in as_completed(future_to_op):
+                op_name = future_to_op[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Operation '{op_name}' failed with error: {e}")
+
+    def _execute_operation(self, op_name: str) -> None:
+        operation = self.operations[op_name]
+        try:
+            result = operation['func']()
+            self.results[op_name] = result
+            operation['is_completed'] = True
+        except Exception as e:
+            self.failed_operations[op_name] = 1
+            logging.error(f"Operation '{op_name}' failed: {e}")
+
+    def _get_execution_order(self) -> List[str]:
+        return sorted(self.operations.keys(), key=lambda x: len(self.operations[x]['dependencies']))
+
+```
+
+## テスト方法
+1. **依存関係の検証**: 存在しない依存関係を設定し、エラーメッセージが正しく表示されることを確認。
+2. **スレッドの動作確認**: スレッド数を最大に設定し、複数のオペレーションが同時に実行されることを確認。
+3. **エラーハンドリングの確認**: 故意に失敗させたオペレーションを追加し、適切なエラーメッセージがログに記録されることを確認。
+4. **結果管理の確認**: オペレーションが成功した際に、結果が正しく`self.results`に記録されることを確認。 
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
