@@ -25182,3 +25182,97 @@ class EnhancedOperationManager:
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-06-25
+
+## 改善テーマ分析
+現在のアルゴリズムにおける「創造性」から「拡張性」への改善には、以下の問題点が見受けられます。
+
+- **依存関係の厳格さ**: 現在のクラス構造では、依存関係が固定されているため、柔軟に新しいオペレーションを追加するのが難しい。
+- **結果の制限性**: 結果管理の設計が特定の構造に基づいているため、異なるフォーマットや追加情報を扱うことが難しい。
+- **スレッド管理のハードコーディング**: 現在のスレッド管理は難易度に応じたスケーラビリティを欠いています。
+
+これらの問題を解決するために、動的依存関係管理と結果の柔軟な構造を持つアルゴリズムを設計することで、より拡張性の高いプラグイン可能なオペレーションマネージャーを実現します。
+
+## 提案コード
+以下は、提案する改善案の実装例です。この実装では、依存関係をダイナミックに管理し、結果のカスタムフォーマットをサポートします。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Any, Dict, List, Union
+
+class DynamicOperationManager:
+    def __init__(self, thread_limit: int = 4):
+        self.operations: Dict[str, Dict[str, Any]] = {}
+        self.results: Dict[str, Union[Any, Dict[str, Any]]] = {}
+        self.failed_operations: Dict[str, int] = {}
+        self.thread_limit = thread_limit
+
+    def add_operation(self, op_name: str, func: Callable, dependencies: List[str] = None, result_format: str = None) -> None:
+        if op_name in self.operations:
+            logging.warning(f"Operation '{op_name}' already exists.")
+            return
+            
+        self.operations[op_name] = {
+            "func": func,
+            "dependencies": dependencies or [],
+            "is_completed": False,
+            "result_format": result_format,
+        }
+        self._validate_dependencies(dependencies)
+
+    def _validate_dependencies(self, dependencies: List[str]) -> None:
+        for dep in dependencies or []:
+            if dep not in self.operations:
+                logging.error(f"Dependency '{dep}' for operation '{dep}' does not exist.")
+
+    def run_operations(self) -> None:
+        ordered_operations = self._get_execution_order()
+        with ThreadPoolExecutor(max_workers=self.thread_limit) as executor:
+            future_to_op = {executor.submit(self._execute_operation, op_name): op_name for op_name in ordered_operations}
+
+            for future in as_completed(future_to_op):
+                op_name = future_to_op[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Operation '{op_name}' failed with error: {e}")
+
+    def _execute_operation(self, op_name: str) -> None:
+        operation = self.operations[op_name]
+        try:
+            result = operation['func']()
+            if operation.get('result_format'):
+                result = self._format_result(result, operation['result_format'])
+            self.results[op_name] = result
+            operation['is_completed'] = True
+        except Exception as e:
+            self.failed_operations[op_name] = 1
+            logging.error(f"Operation '{op_name}' failed: {e}")
+
+    def _get_execution_order(self) -> List[str]:
+        return sorted(self.operations.keys(), key=lambda x: len(self.operations[x]['dependencies']))
+
+    def _format_result(self, result: Any, format_type: str) -> Any:
+        if format_type == "json":
+            import json
+            return json.dumps(result)
+        return result  # Default fallback
+```
+
+## テスト方法
+以下のテストを通して、拡張性を検証します。
+
+1. **依存関係の検証**: 存在しない依存関係を設定し、エラーメッセージが正しく表示されることを確認。
+2. **新オペレーションの追加能力**: 依存関係に影響を受けずに新しいオペレーションを追加できることを確認。
+3. **結果フォーマットの検証**: `result_format`を設定したオペレーションの結果が指定された形式（例: JSON）になることを確認。
+4. **スレッドの動作確認**: スレッド数を最大に設定し、複数のオペレーションが同時に実行されることを確認。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
