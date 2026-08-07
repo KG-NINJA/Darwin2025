@@ -1,77 +1,49 @@
-from typing import List, Dict, Any
-import asyncio
-import functools
+from typing import Callable, Dict, Any
+from collections import defaultdict
 
-class Strategy:
-    async def execute(self, data: List[float]) -> Dict[str, Any]:
-        raise NotImplementedError("このメソッドはオーバーライドされる必要があります。")
-
-class StatisticsStrategy(Strategy):
-    async def execute(self, data: List[float]) -> Dict[str, float]:
-        if not data:
-            return {'error': "データが空です。"}
-        return {
-            'mean': sum(data) / len(data),
-            'sum': sum(data)
-        }
-
-class MedianStrategy(Strategy):
-    async def execute(self, data: List[float]) -> Dict[str, float]:
-        if not data:
-            return {'error': "データが空です。"}
-        sorted_data = sorted(data)
-        mid = len(sorted_data) // 2
-        return {
-            'median': (sorted_data[mid - 1] + sorted_data[mid]) / 2 if len(sorted_data) % 2 == 0 else sorted_data[mid]
-        }
-
-class StableDataProcessor:
+class FlexibleDataProcessor:
     def __init__(self):
-        self.strategies: Dict[str, Strategy] = {}
-        self.cache: Dict[str, Dict[str, Any]] = {}
+        # 戦略を保持するための辞書
+        self.strategies: Dict[str, Callable[[Any], Dict[str, Any]]] = defaultdict(lambda: None)
 
-    def add_strategy(self, name: str, strategy: Strategy):
+    def add_strategy(self, name: str, strategy: Callable[[Any], Dict[str, Any]]):
+        """新しい戦略を追加するメソッド"""
         self.strategies[name] = strategy
 
-    def list_strategies(self) -> List[str]:
-        return list(self.strategies.keys())
-
-    async def process_data(self, data: List[float], strategy_name: str) -> Dict[str, Any]:
-        if strategy_name in self.cache:
-            return self.cache[strategy_name]
-
-        if strategy_name not in self.strategies:
-            return {'error': f"指定された戦略名 '{strategy_name}' は無効です。"}
+    def execute_strategy(self, strategy_name: str, data: Any) -> Dict[str, Any]:
+        """特定の戦略を実行するメソッド"""
+        if strategy_name not in self.strategies or self.strategies[strategy_name] is None:
+            return {'error': f"指定された戦略 '{strategy_name}' は存在しません。"}
         
-        try:
-            self.validate_data(data)
-            result = await self.strategies[strategy_name].execute(data)
-            self.cache[strategy_name] = result
-            return result
-        except ValueError as e:
-            return {'error': f"バリデーションエラー: {str(e)}"}
-        except Exception as e:
-            return {'error': f"予期しないエラーが発生しました: {str(e)}"}
+        return self.strategies[strategy_name](data)
 
-    def validate_data(self, data: List[float]):
-        if not data:
-            raise ValueError("データを入力してください。リストが空です。")
-        if any(not isinstance(x, (int, float)) for x in data):
-            raise ValueError("全てのデータは数値である必要があります。")
+# 例としての戦略
+def mean_strategy(data: List[float]) -> Dict[str, float]:
+    if not data:
+        return {'error': "データが空です。"}
+    return {'mean': sum(data) / len(data)}
 
+def median_strategy(data: List[float]) -> Dict[str, float]:
+    if not data:
+        return {'error': "データが空です。"}
+    sorted_data = sorted(data)
+    mid = len(sorted_data) // 2
+    return {
+        'median': (sorted_data[mid - 1] + sorted_data[mid]) / 2 if len(sorted_data) % 2 == 0 else sorted_data[mid]
+    }
+
+# main関数の例
 async def main():
-    data_processor = StableDataProcessor()
-    data_processor.add_strategy('statistics', StatisticsStrategy())
-    data_processor.add_strategy('median', MedianStrategy())
+    data_processor = FlexibleDataProcessor()
+    data_processor.add_strategy('mean', mean_strategy)
+    data_processor.add_strategy('median', median_strategy)
 
-    print(f"利用可能な戦略: {data_processor.list_strategies()}")
+    print("利用可能な戦略:", list(data_processor.strategies.keys()))
 
-    try:
-        results_stats = await data_processor.process_data([1, 2, 3.5, 4.0, 5], strategy_name='statistics')
-        results_median = await data_processor.process_data([1, 2, 3.5, 4.0, 5], strategy_name='median')
-        print(results_stats)
-        print(results_median)
-    except Exception as e:
-        print(f"エラーが発生しました: {str(e)}")
+    results_mean = data_processor.execute_strategy('mean', [1, 2, 3, 4, 5])
+    results_median = data_processor.execute_strategy('median', [1, 2, 3, 4, 5])
+    
+    print("Mean結果:", results_mean)
+    print("Median結果:", results_median)
 
 # asyncio.run(main())
