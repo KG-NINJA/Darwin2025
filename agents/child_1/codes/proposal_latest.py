@@ -1,24 +1,32 @@
 class EnhancedDataProcessor:
     
+    def _create_error_message(self, message: str) -> Dict[str, str]:
+        """ エラーメッセージを生成します。 """
+        return {"error": message}
+    
     def _get_strategy(self, name: str):
         """ 戦略を取得するヘルパー関数 """
         strategy = self.strategies.get(name)
-        if not strategy:
+        if strategy is None:
             return self._create_error_message(f"戦略 '{name}' が存在しません。")
         return strategy
 
-    def add_strategy(self, name: str, strategy: Strategy):
+    def add_strategy(self, name: str, strategy) -> None:  # Strategyクラスを引数に指定
         if self._is_valid_strategy(name, strategy):
             self.strategies[name] = strategy
             print(f"戦略 '{name}' が追加されました。")
-        
-    def load_strategy(self, module_name: str, strategy_name: str):
+        else:
+            self._create_error_message(f"戦略 '{name}' の追加に失敗しました。")
+
+    def load_strategy(self, module_name: str, strategy_name: str) -> None:
         """外部モジュールから戦略を読み込みます。"""
         try:
             module = importlib.import_module(module_name)
             strategy_class = getattr(module, strategy_name)
-            strategy_instance = strategy_class() if callable(strategy_class) else None
-            return self.add_strategy(strategy_name, strategy_instance) if strategy_instance else self._create_error_message(f"{strategy_name} は呼び出し可能ではありません。")
+            if callable(strategy_class):  # 呼び出し可能か確認
+                self.add_strategy(strategy_name, strategy_class())
+            else:
+                return self._create_error_message(f"{strategy_name} は呼び出し可能ではありません。")
         except ImportError:
             return self._create_error_message(f"モジュール '{module_name}' の読み込みに失敗しました。")
         except AttributeError:
