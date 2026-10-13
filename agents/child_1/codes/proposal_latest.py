@@ -36,15 +36,20 @@ class EnhancedStrategyExecutor:
             logging.info(f"Strategy '{strategy.__class__.__name__}' executed successfully.")
         except Exception as e:
             self.log_error(strategy, e)
+            self.roll_back_strategy(strategy)
 
     def log_error(self, strategy, error):
         """エラーログを出力"""
         logging.error(f"Error in strategy '{strategy.__class__.__name__}': {str(error)}")
 
+    def roll_back_strategy(self, strategy):
+        """戦略のロールバック処理"""
+        logging.info(f"Rolling back strategy '{strategy.__class__.__name__}'.")
+        # ここにロールバックの具体的な処理を実装すること
+
     def get_dynamic_worker_count(self):
         """動的にワーカースレッドの数を決定"""
-        # 環境に応じたスレッド数を計算するロジックを追加可能
-        return 5  # 例として5を返す
+        return 5  # 環境に応じてスレッド数を調整
 
 # 使用例
 executor = EnhancedStrategyExecutor(max_workers=4)
