@@ -1,5 +1,6 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import os  # 環境負荷を決定するために使用
 
 class Strategy:
     """戦略の基底クラス"""
@@ -13,10 +14,10 @@ class SampleStrategy(Strategy):
         logging.info("SampleStrategy is executing.")
         # ここに処理を実装します
 
-class EnhancedStrategyExecutor:
+class FlexibleStrategyExecutor:
     def __init__(self, max_workers=None):
         self.strategies = []
-        self.max_workers = max_workers or self.get_dynamic_worker_count()
+        self.max_workers = max_workers or self.__determine_dynamic_worker_count()
     
     def add_strategy(self, strategy: Strategy):
         """新しい戦略を追加"""
@@ -33,36 +34,37 @@ class EnhancedStrategyExecutor:
             futures = {executor.submit(strategy.execute): strategy for strategy in self.strategies}
             for future in as_completed(futures):
                 strategy = futures[future]
-                self.handle_future(future, strategy)
+                self.__handle_future(future, strategy)
 
-    def handle_future(self, future, strategy):
+    def __handle_future(self, future, strategy):
         """Futureタスクの結果を処理"""
         try:
             future.result()
             logging.info(f"Strategy '{strategy.__class__.__name__}' executed successfully.")
         except Exception as e:
-            self.log_error(strategy, e)
-            self.roll_back_strategy(strategy)
+            self.__log_error(strategy, e)
+            self.__roll_back_strategy(strategy)
 
-    def log_error(self, strategy, error):
+    def __log_error(self, strategy, error):
         """エラーログを出力"""
         logging.error(f"Error in strategy '{strategy.__class__.__name__}': {str(error)}")
 
-    def roll_back_strategy(self, strategy):
+    def __roll_back_strategy(self, strategy):
         """戦略のロールバック処理"""
         logging.info(f"Rolling back strategy '{strategy.__class__.__name__}'.")
         # ここにロールバックの具体的な処理を実装すること
 
-    def get_dynamic_worker_count(self):
+    def __determine_dynamic_worker_count(self):
         """動的にワーカースレッドの数を決定"""
-        # 環境に応じてスレッド数を調整（最適化）
-        return min(10, max(1, self.get_environment_load()))
+        load_factor = self.__evaluate_environment_load()
+        return max(1, min(10, load_factor))
 
-    def get_environment_load(self):
-        """仮想の環境負荷を返す関数 (要実装)"""
-        return 5  # 実際の環境負荷によって調整
+    def __evaluate_environment_load(self):
+        """仮想の環境負荷を返す関数"""
+        # 環境に応じてスレッド数を調整（仮の実装）
+        return os.cpu_count() or 1
 
 # 使用例
-executor = EnhancedStrategyExecutor(max_workers=4)
+executor = FlexibleStrategyExecutor(max_workers=4)
 executor.add_strategy(SampleStrategy())
 executor.execute_strategies()
