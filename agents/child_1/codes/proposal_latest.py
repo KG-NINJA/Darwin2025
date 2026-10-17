@@ -1,7 +1,11 @@
+class Strategy:
+    """全ての戦略の基底クラス"""
+    def execute(self):
+        raise NotImplementedError("Subclasses must implement the execute method.")
+
 class CreativeStrategy(Strategy):
     """創造性を発揮できる戦略のクラス"""
     def execute(self):
-        # 創造的な手法を用いた処理の実装
         logging.info("CreativeStrategy is executing.")
         # ここに具体的な実装を追加
 
