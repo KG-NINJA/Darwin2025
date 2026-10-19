@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 class Strategy:
     """全ての戦略の基底クラス"""
@@ -11,8 +12,10 @@ class CreativeStrategy(Strategy):
         try:
             logging.info("CreativeStrategy is executing.")
             # 具体的な実装を追加
+            return "Creative result"
         except Exception as e:
             logging.error(f"Error occurred in CreativeStrategy: {e}")
+            return None
 
 class CompositeStrategy(Strategy):
     """複数の戦略を統合して実行する戦略クラス"""
@@ -21,12 +24,13 @@ class CompositeStrategy(Strategy):
 
     def execute(self):
         results = []
-        for strategy in self.strategies:
-            try:
-                logging.info(f"Executing strategy: {strategy.__class__.__name__}")
-                results.append(strategy.execute())
-            except Exception as e:
-                logging.error(f"Error occurred in {strategy.__class__.__name__}: {e}")
+        with ThreadPoolExecutor() as executor:
+            future_results = {executor.submit(strategy.execute()): strategy for strategy in self.strategies}
+            for future in future_results:
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    logging.error(f"Error occurred in {future_results[future].__class__.__name__}: {e}")
         return results
 
 class FlexibleStrategyExecutor:
@@ -38,11 +42,16 @@ class FlexibleStrategyExecutor:
         self.strategies.append(strategy)
 
     def execute_strategies(self):
-        for strategy in self.strategies:
-            strategy.execute()
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_results = {executor.submit(strategy.execute()): strategy for strategy in self.strategies}
+            for future in future_results:
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Error occurred in {future_results[future].__class__.__name__}: {e}")
 
 # 使用例
 executor = FlexibleStrategyExecutor(max_workers=4)
 executor.add_strategy(CreativeStrategy())
-executor.add_strategy(CompositeStrategy(CreativeStrategy()))  # SampleStrategy は未定義のため削除
+executor.add_strategy(CompositeStrategy(CreativeStrategy())) 
 executor.execute_strategies()
