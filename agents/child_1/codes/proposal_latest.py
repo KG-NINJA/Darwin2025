@@ -1,5 +1,5 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class Strategy:
     """全ての戦略の基底クラス"""
@@ -26,11 +26,12 @@ class CompositeStrategy(Strategy):
         results = []
         with ThreadPoolExecutor() as executor:
             future_results = {executor.submit(strategy.execute()): strategy for strategy in self.strategies}
-            for future in future_results:
+            for future in as_completed(future_results):
+                strategy = future_results[future]
                 try:
                     results.append(future.result())
                 except Exception as e:
-                    logging.error(f"Error occurred in {future_results[future].__class__.__name__}: {e}")
+                    logging.error(f"Error occurred in {strategy.__class__.__name__}: {e}")
         return results
 
 class FlexibleStrategyExecutor:
@@ -44,11 +45,12 @@ class FlexibleStrategyExecutor:
     def execute_strategies(self):
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_results = {executor.submit(strategy.execute()): strategy for strategy in self.strategies}
-            for future in future_results:
+            for future in as_completed(future_results):
+                strategy = future_results[future]
                 try:
                     future.result()
                 except Exception as e:
-                    logging.error(f"Error occurred in {future_results[future].__class__.__name__}: {e}")
+                    logging.error(f"Error occurred in {strategy.__class__.__name__}: {e}")
 
 # 使用例
 executor = FlexibleStrategyExecutor(max_workers=4)
