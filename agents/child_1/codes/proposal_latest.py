@@ -8,11 +8,12 @@ class Strategy:
 
 class CreativeStrategy(Strategy):
     """創造性を発揮できる戦略のクラス"""
-    def execute(self):
+    def execute(self, variation=None):
         try:
-            logging.info("CreativeStrategy is executing.")
-            # 具体的な実装を追加
-            return "Creative result"
+            logging.info("CreativeStrategy is executing with variation: %s", variation)
+            # ユーザーが指定する独自のアルゴリズムを追加
+            result = f"Creative result with variation {variation}" if variation else "Creative result"
+            return result
         except Exception as e:
             logging.error(f"Error occurred in CreativeStrategy: {e}")
             return None
@@ -35,6 +36,7 @@ class CompositeStrategy(Strategy):
         return results
 
 class FlexibleStrategyExecutor:
+    """戦略を動的に管理・実行するためのエグゼキュータ"""
     def __init__(self, max_workers=4):
         self.strategies = []
         self.max_workers = max_workers
@@ -51,9 +53,16 @@ class FlexibleStrategyExecutor:
                     future.result()
                 except Exception as e:
                     logging.error(f"Error occurred in {strategy.__class__.__name__}: {e}")
+                    
+    def customize_strategy(self, strategy_class, variation):
+        """戦略に対するカスタマイズを提供します"""
+        strategy_instance = strategy_class()
+        return strategy_instance.execute(variation)
 
 # 使用例
 executor = FlexibleStrategyExecutor(max_workers=4)
 executor.add_strategy(CreativeStrategy())
-executor.add_strategy(CompositeStrategy(CreativeStrategy())) 
+executor.add_strategy(CompositeStrategy(CreativeStrategy()))
 executor.execute_strategies()
+# 戦略をカスタマイズして実行
+print(executor.customize_strategy(CreativeStrategy, variation="High Creativity"))
