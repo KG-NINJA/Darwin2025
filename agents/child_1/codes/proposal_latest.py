@@ -53,11 +53,6 @@ class FlexibleStrategyExecutor:
                 except Exception as e:
                     logging.error(f"Error occurred in {strategy.__class__.__name__}: {e}")
 
-    def customize_strategy(self, strategy_class, variation):
-        """戦略に対するカスタマイズを提供します"""
-        strategy_instance = strategy_class()
-        return strategy_instance.execute(variation)
-
     def execute_with_order(self, strategy_order):
         """指定された順序で戦略を実行します"""
         results = []
