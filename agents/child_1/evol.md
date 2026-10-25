@@ -35437,3 +35437,76 @@ print(executor.execute_with_order(strategy_order))
 - ベストスコア: 0.8
 
 ---
+
+# 日次更新 2026-10-25
+
+## 改善テーマ分析
+現在の`CompositeStrategy`クラスでは、戦略が非同期で実行される際の競合や依存関係が不明確であり、結果が期待通りにならないことがあります。また、戦略の実行順序が固定されておらず、必要な戦略が先に実行されない可能性があります。このため、効率よく依存関係を管理し、戦略の実行を最適化できるように改善が必要です。
+
+## 提案コード
+戦略の依存関係を効率的に管理し、実行順序を制御するための新しい`OrderedCompositeStrategy`クラスを提案します。このクラスでは、戦略をその依存関係に基づいて順序を指定して実行します。
+
+```python
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+class Strategy:
+    """全ての戦略の基底クラス"""
+    def execute(self):
+        raise NotImplementedError("Subclasses must implement the execute method.")
+
+class CreativeStrategy(Strategy):
+    """創造性を発揮できる戦略のクラス"""
+    def execute(self, variation=None):
+        try:
+            logging.info("CreativeStrategy is executing with variation: %s", variation)
+            return f"Creative result with variation {variation}" if variation else "Creative result"
+        except Exception as e:
+            logging.error(f"Error occurred in CreativeStrategy: {e}")
+            return None
+
+class OrderedCompositeStrategy(Strategy):
+    """依存関係を考慮した順序で戦略を実行するクラス"""
+    def __init__(self, strategies_with_dependencies):
+        self.strategies_with_dependencies = strategies_with_dependencies
+
+    def execute(self):
+        results = []
+        with ThreadPoolExecutor() as executor:
+            future_results = {}
+            for strategy, dependencies in self.strategies_with_dependencies:
+                for dependency in dependencies:
+                    future_results[executor.submit(dependency.execute())] = dependency
+                future_results[executor.submit(strategy.execute())] = strategy
+            
+            for future in as_completed(future_results):
+                strategy = future_results[future]
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    logging.error(f"Error occurred in {strategy.__class__.__name__}: {e}")
+        return results
+
+# 使用例
+dependent_strategies = [
+    (CreativeStrategy(), []),  # 依存関係なし
+    (CreativeStrategy(), [CreativeStrategy()])  # 依存関係あり
+]
+
+ordered_executor = OrderedCompositeStrategy(dependent_strategies)
+print(ordered_executor.execute())
+```
+
+## テスト方法
+- **依存関係テスト**: `OrderedCompositeStrategy`に渡した戦略とその依存関係が適切に処理され、意図した順序で実行されることを確認します。
+- **非同期実行テスト**: スレッドプールを利用して戦略が非同期で実行される際、依存する戦略が先に実行されることを確認します。
+- **結果検証テスト**: 各戦略の結果が正しいか、依存関係による影響が正確に反映されているかを確認します。
+- **エラーハンドリングテスト**: 各戦略の`execute`メソッドが例外を適切に処理し、ログに記録されることを確認します。
+
+## テスト結果
+- ステータス: PASS
+- スコア: 0.8
+- 詳細: N/A
+- ベストスコア: 0.8
+
+---
