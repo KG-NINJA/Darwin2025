@@ -23,12 +23,22 @@ class OrderedCompositeStrategy(Strategy):
 
     def execute(self):
         results = []
+        
+        # 依存関係を解決する
         with ThreadPoolExecutor() as executor:
             future_results = {}
             for strategy, dependencies in self.strategies_with_dependencies:
-                for dependency in dependencies:
-                    future_results[executor.submit(dependency.execute())] = dependency
-                future_results[executor.submit(strategy.execute())] = strategy
+                # 依存関係を先に実行
+                dependency_futures = [executor.submit(dep.execute) for dep in dependencies]
+                
+                # 全依存関係が完了するのを待機
+                for future in as_completed(dependency_futures):
+                    future_result = future.result()  # 依存関係の結果を取得
+                    if future_result is None:
+                        logging.error(f"Dependency failed: {future_result}")
+               
+                # 戦略を実行
+                future_results[executor.submit(strategy.execute)] = strategy
             
             for future in as_completed(future_results):
                 strategy = future_results[future]
