@@ -1,7 +1,6 @@
 name: 🧬 Darwin2025 Evolver (Code Evolution Mode)
 on:
-  schedule:
-    - cron: "0 3 * * *"   # JST正午に実行
+  # Scheduled runs paused until Codex startup and generated-code isolation are fixed.
   workflow_dispatch:
 permissions:
   contents: write
