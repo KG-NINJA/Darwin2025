@@ -36,13 +36,14 @@ jobs:
           NEXT_THEME=${themes[$index]}
           
           DATE=$(date '+%Y-%m-%d')
-          python3 << PYSCRIPT
+          export THEME NEXT_THEME BEST_SCORE ITER DATE
+          python3 << 'PYSCRIPT'
           import os
-          theme = "$THEME"
-          next_theme = "$NEXT_THEME"
-          best_score = "$BEST_SCORE"
-          iter_num = "$ITER"
-          date_str = "$DATE"
+          theme = os.environ['THEME']
+          next_theme = os.environ['NEXT_THEME']
+          best_score = os.environ['BEST_SCORE']
+          iter_num = os.environ['ITER']
+          date_str = os.environ['DATE']
           
           prompt = f"""あなたは進化するAIエージェントです。
           以下は前回までの改善ログです：
