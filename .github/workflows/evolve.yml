@@ -36,13 +36,14 @@ jobs:
           NEXT_THEME=${themes[$index]}
           
           DATE=$(date '+%Y-%m-%d')
-          python3 << PYSCRIPT
+          export THEME NEXT_THEME BEST_SCORE ITER DATE
+          python3 << 'PYSCRIPT'
           import os
-          theme = "$THEME"
-          next_theme = "$NEXT_THEME"
-          best_score = "$BEST_SCORE"
-          iter_num = "$ITER"
-          date_str = "$DATE"
+          theme = os.environ['THEME']
+          next_theme = os.environ['NEXT_THEME']
+          best_score = os.environ['BEST_SCORE']
+          iter_num = os.environ['ITER']
+          date_str = os.environ['DATE']
           
           prompt = f"""あなたは進化するAIエージェントです。
           以下は前回までの改善ログです：
@@ -125,28 +126,24 @@ jobs:
           PYEOF
       
       # --- テスト実行 ---
-      - name: 🧪 Test generated code
+      - name: 🧪 Validate generated code without execution
         run: |
           python3 << 'PYEOF'
-          import sys
+          import ast
           import json
           
           try:
-              # 生成されたコードをインポート
-              sys.path.insert(0, 'agents/child_1/codes')
-              
+              # Parse model-generated code as data; never execute it on the runner.
               # 簡単なテスト：コードが構文的に正しいか
               with open('agents/child_1/codes/proposal_latest.py', 'r') as f:
                   code = f.read()
               
-              compile(code, 'proposal_latest.py', 'exec')
-              
-              # テスト実行（サンドボックス内）
-              namespace = {}
-              exec(code, namespace)
-              
-              # 関数が定義されているか確認
-              functions = [name for name in namespace if callable(namespace[name]) and not name.startswith('_')]
+              tree = ast.parse(code, filename='proposal_latest.py')
+              functions = [
+                  node.name for node in tree.body
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and not node.name.startswith('_')
+              ]
               
               if functions:
                   test_result = {
@@ -154,14 +151,14 @@ jobs:
                       "functions_found": functions,
                       "score": 0.8
                   }
-                  print("✅ Code test PASSED")
+                  print("✅ Code static validation PASSED")
               else:
                   test_result = {
                       "status": "FAIL",
                       "error": "No functions defined",
                       "score": 0
                   }
-                  print("❌ Code test FAILED")
+                  print("❌ Code static validation FAILED")
               
               with open('test_result.json', 'w') as f:
                   json.dump(test_result, f)
